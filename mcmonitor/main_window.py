@@ -12,6 +12,8 @@ from PySide6.QtCore import (
     QObject,
     QPoint,
     QPointF,
+    QRectF,
+    QSize,
     Qt,
     QTimer,
     QVariantAnimation,
@@ -23,6 +25,8 @@ from PySide6.QtGui import (
     QIcon,
     QLinearGradient,
     QPainter,
+    QPainterPath,
+    QPen,
     QPixmap,
     QRadialGradient,
 )
@@ -105,6 +109,30 @@ QFrame#emptyCard {
     background: rgba(25, 39, 42, 220);
     border: 1px solid rgba(143, 209, 179, 60);
     border-radius: 20px;
+}
+QToolButton#searchButton, QToolButton#settingsButton {
+    color: #d7e8df;
+    background: rgba(36, 57, 58, 210);
+    border: 1px solid rgba(133, 188, 177, 52);
+    border-radius: 12px;
+    font-size: 19px;
+    font-weight: 700;
+}
+QToolButton#searchButton:hover, QToolButton#settingsButton:hover {
+    color: #ffffff;
+    background: rgba(67, 103, 87, 220);
+    border-color: rgba(179, 231, 199, 110);
+}
+QToolButton#accountButton {
+    color: #e8f4ec;
+    background: rgba(36, 57, 58, 210);
+    border: 1px solid rgba(133, 188, 177, 70);
+    border-radius: 20px;
+    font-size: 16px;
+}
+QToolButton#accountButton:hover {
+    background: rgba(67, 103, 87, 220);
+    border-color: rgba(179, 231, 199, 130);
 }
 QPushButton {
     color: #e8f4ec;
@@ -225,6 +253,43 @@ def _button(text: str, object_name: str = "") -> QPushButton:
         button.setObjectName(object_name)
     button.setCursor(Qt.PointingHandCursor)
     return button
+
+
+def _action_icon(kind: str) -> QIcon:
+    pixmap = QPixmap(64, 64)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setPen(QPen(QColor("#c9ddd3"), 5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    if kind == "search":
+        painter.drawEllipse(QRectF(9, 8, 34, 34))
+        painter.drawLine(QPointF(36, 36), QPointF(54, 54))
+    elif kind == "account":
+        painter.drawEllipse(QRectF(23, 8, 18, 18))
+        shoulders = QPainterPath(QPointF(9, 54))
+        shoulders.cubicTo(10, 39, 20, 33, 32, 33)
+        shoulders.cubicTo(44, 33, 54, 39, 55, 54)
+        painter.drawPath(shoulders)
+    elif kind == "settings":
+        painter.drawEllipse(QRectF(17, 17, 30, 30))
+        painter.drawEllipse(QRectF(27, 27, 10, 10))
+        for start, end in (
+            ((32, 4), (32, 17)),
+            ((32, 47), (32, 60)),
+            ((4, 32), (17, 32)),
+            ((47, 32), (60, 32)),
+            ((12, 12), (21, 21)),
+            ((43, 43), (52, 52)),
+            ((12, 52), (21, 43)),
+            ((43, 21), (52, 12)),
+        ):
+            painter.drawLine(QPointF(*start), QPointF(*end))
+    elif kind == "refresh":
+        painter.drawArc(QRectF(12, 12, 40, 40), 38 * 16, 285 * 16)
+        painter.drawLine(QPointF(43, 12), QPointF(54, 12))
+        painter.drawLine(QPointF(54, 12), QPointF(53, 24))
+    painter.end()
+    return QIcon(pixmap)
 
 
 class AuroraSurface(QWidget):
@@ -899,8 +964,8 @@ class MainWindow(QMainWindow):
         self._community_request_id = 0
         self.setWindowTitle("MC Monitor")
         self.setWindowIcon(QIcon(str(resource_path("assets/icon.ico"))))
-        self.setMinimumSize(390, 500)
-        self.resize(430, 530)
+        self.setMinimumSize(410, 580)
+        self.resize(460, 620)
         self.setStyleSheet(_window_stylesheet(self.controller.config.accent_color))
 
         surface = AuroraSurface()
@@ -911,62 +976,77 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(22, 18, 22, 16)
         layout.setSpacing(13)
 
-        # ---- Header: логотип + поиск + настройки + аватар ----
-        header = QHBoxLayout()
-        header.setSpacing(12)
-
+        # Keep the brand on its own row, like the Android screen.
         self.logo = QLabel()
-        self.logo.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        pixmap = QIcon(str(resource_path("assets/mcm-logo.png"))).pixmap(360, 70)
+        self.logo.setAlignment(Qt.AlignCenter)
+        pixmap = QIcon(str(resource_path("assets/mcm-logo.png"))).pixmap(280, 54)
         if not pixmap.isNull():
             self.logo.setPixmap(
                 pixmap.scaled(
-                    360, 70, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                    280, 54, Qt.KeepAspectRatio, Qt.SmoothTransformation
                 )
             )
         else:
             self.logo.setText("MC MONITOR")
-            self.logo.setStyleSheet("font-size: 25px; font-weight: 900; color: #9de064;")
-        self.logo.setFixedHeight(58)
-        header.addWidget(self.logo, 1)
-
-        # Поиск
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Поиск серверов…")
-        self.search_input.setMinimumWidth(200)
-        self.search_input.setMaximumWidth(320)
-        self.search_input.textChanged.connect(self._on_search_changed)
-        header.addWidget(self.search_input)
-
-        self.settings_button = QToolButton()
-        self.settings_button.setText("⚙")
-        self.settings_button.setToolTip("Настройки")
-        self.settings_button.setCursor(Qt.PointingHandCursor)
-        self.settings_button.setStyleSheet(
-            "QToolButton { color: #e8eee9; font-size: 18px; background: transparent; border: none; padding: 6px; }"
-            "QToolButton:hover { color: #ffffff; background: rgba(255,255,255,12); border-radius: 10px; }"
-        )
-        self.settings_button.clicked.connect(self._open_settings)
-        header.addWidget(self.settings_button)
-
-        self.avatar_button = QToolButton()
-        self.avatar_button.setFixedSize(34, 34)
-        self.avatar_button.setCursor(Qt.PointingHandCursor)
-        self.avatar_button.setStyleSheet(
-            "QToolButton { color: #e8eee9; font-size: 16px; background: rgba(255,255,255,10); border: 1px solid rgba(255,255,255,26); border-radius: 17px; }"
-            "QToolButton:hover { background: rgba(255,255,255,22); border-color: rgba(255,255,255,46); }"
-        )
-        self.avatar_button.setText("👤")
-        self.avatar_button.setToolTip("Аккаунт и настройки")
-        self.avatar_button.clicked.connect(self._account_clicked)
-        header.addWidget(self.avatar_button)
-
-        layout.addLayout(header)
+            self.logo.setStyleSheet("font-size: 24px; font-weight: 900; color: #9de064;")
+        self.logo.setFixedHeight(50)
+        layout.addWidget(self.logo)
 
         caption = QLabel("JAVA + BEDROCK  ·  МОНИТОРИНГ СЕРВЕРОВ")
         caption.setAlignment(Qt.AlignCenter)
         caption.setObjectName("sectionCaption")
         layout.addWidget(caption)
+
+        # Search, account and settings live together on a dedicated action row.
+        header = QHBoxLayout()
+        header.setSpacing(8)
+
+        self.search_button = QToolButton()
+        self.search_button.setObjectName("searchButton")
+        self.search_button.setIcon(_action_icon("search"))
+        self.search_button.setIconSize(QSize(21, 21))
+        self.search_button.setFixedSize(40, 40)
+        self.search_button.setCursor(Qt.PointingHandCursor)
+        self.search_button.setToolTip("Поиск серверов")
+        self.search_button.setAccessibleName("Поиск серверов")
+        self.search_button.clicked.connect(self._toggle_search)
+        header.addWidget(self.search_button)
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Поиск серверов…")
+        self.search_input.setMinimumWidth(120)
+        self.search_input.setMaximumWidth(280)
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.setVisible(False)
+        self.search_input.textChanged.connect(self._on_search_changed)
+        header.addWidget(self.search_input, 1)
+        self.header_spacer = QWidget()
+        self.header_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        header.addWidget(self.header_spacer, 1)
+
+        self.account_button = QToolButton()
+        self.account_button.setObjectName("accountButton")
+        self.account_button.setFixedSize(40, 40)
+        self.account_button.setCursor(Qt.PointingHandCursor)
+        self.account_button.setIcon(_action_icon("account"))
+        self.account_button.setIconSize(QSize(21, 21))
+        self.account_button.setToolTip("Аккаунт")
+        self.account_button.setAccessibleName("Аккаунт")
+        self.account_button.clicked.connect(self._account_clicked)
+        header.addWidget(self.account_button)
+
+        self.settings_button = QToolButton()
+        self.settings_button.setObjectName("settingsButton")
+        self.settings_button.setIcon(_action_icon("settings"))
+        self.settings_button.setIconSize(QSize(21, 21))
+        self.settings_button.setFixedSize(40, 40)
+        self.settings_button.setToolTip("Настройки")
+        self.settings_button.setAccessibleName("Настройки")
+        self.settings_button.setCursor(Qt.PointingHandCursor)
+        self.settings_button.clicked.connect(self._open_settings)
+        header.addWidget(self.settings_button)
+
+        layout.addLayout(header)
 
         summary = QFrame()
         summary.setObjectName("summaryCard")
@@ -984,18 +1064,18 @@ class MainWindow(QMainWindow):
         self.summary_label.setObjectName("serverCount")
         summary_text.addWidget(self.summary_label)
         summary_layout.addLayout(summary_text, 1)
-        self.account_button = _button("Войти", "quietButton")
-        self.account_button.setMaximumWidth(110)
-        self.account_button.setToolTip("Вход и синхронизация списка серверов")
-        self.account_button.clicked.connect(self._account_clicked)
-        summary_layout.addWidget(self.account_button)
         self.online_badge = QLabel("● 0 В СЕТИ")
         self.online_badge.setObjectName("onlineBadge")
         self.online_badge.setAlignment(Qt.AlignCenter)
         summary_layout.addWidget(self.online_badge)
-        refresh_button = _button("↻", "quietButton")
+        refresh_button = QToolButton()
+        refresh_button.setObjectName("settingsButton")
+        refresh_button.setIcon(_action_icon("refresh"))
+        refresh_button.setIconSize(QSize(19, 19))
         refresh_button.setFixedSize(38, 36)
+        refresh_button.setCursor(Qt.PointingHandCursor)
         refresh_button.setToolTip("Обновить все серверы")
+        refresh_button.setAccessibleName("Обновить все серверы")
         refresh_button.clicked.connect(self.controller.request_refresh)
         summary_layout.addWidget(refresh_button)
         layout.addWidget(summary)
@@ -1389,12 +1469,39 @@ class MainWindow(QMainWindow):
         except cloud_sync.CloudError as exc:
             log.warning("Не удалось открыть сессию аккаунта: %s", exc)
             session = None
-        self.account_button.setText(session.username if session else "Войти")
-        self.account_button.setToolTip(
-            "Синхронизация серверов для " + session.username
-            if session
-            else "Вход и синхронизация списка серверов"
+        self.account_button.setText(
+            session.username[:1].upper() if session else ""
         )
+        self.account_button.setIcon(
+            QIcon() if session else _action_icon("account")
+        )
+        self.account_button.setToolTip(
+            "Аккаунт: " + session.username
+            if session
+            else "Войти или создать аккаунт"
+        )
+        self.account_button.setAccessibleName(
+            "Аккаунт " + session.username if session else "Войти в аккаунт"
+        )
+
+    def _toggle_search(self) -> None:
+        opening = not self.search_input.isVisible()
+        if opening:
+            self.search_input.show()
+            self.header_spacer.hide()
+            self.search_button.setIcon(QIcon())
+            self.search_button.setText("×")
+            self.search_button.setToolTip("Закрыть поиск")
+            self.search_button.setAccessibleName("Закрыть поиск")
+            self.search_input.setFocus()
+            return
+        self.search_input.clear()
+        self.search_input.hide()
+        self.header_spacer.show()
+        self.search_button.setText("")
+        self.search_button.setIcon(_action_icon("search"))
+        self.search_button.setToolTip("Поиск серверов")
+        self.search_button.setAccessibleName("Поиск серверов")
 
     def _logout(self) -> None:
         try:
@@ -1558,7 +1665,7 @@ class MainWindow(QMainWindow):
         else:
             self.scroll.setFixedHeight(0)
         desired_height = self.centralWidget().layout().sizeHint().height()
-        self.resize(self.width(), min(760, max(500, desired_height)))
+        self.resize(self.width(), min(760, max(580, desired_height)))
 
     def _update_summary(self) -> None:
         servers = self.controller.config.servers
