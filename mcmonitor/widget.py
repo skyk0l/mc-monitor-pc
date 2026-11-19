@@ -1281,7 +1281,7 @@ class WidgetApp:
                 online_count=online_count,
                 max_players=500 if index == 0 else 120,
                 players=demo_names if index == 0 else [],
-                version="KenigCraft 1.16.4-1.21.11" if index == 0 else "Paper 1.21.4",
+                version="Java 1.16.4-1.21.11" if index == 0 else "Paper 1.21.4",
             )
             self.widget.display[server.address] = float(online_count)
         self.widget._last_update = time.time()
