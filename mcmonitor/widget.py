@@ -1025,7 +1025,7 @@ class StatusWidget(QWidget):
 
     def closeEvent(self, event) -> None:  # noqa: ANN001
         event.ignore()
-        self.hide()
+        self.app.hide_widget()
 
 
 class Toast(QWidget):
@@ -1173,9 +1173,12 @@ class WidgetApp:
     def run(self) -> int:
         self.qapp.aboutToQuit.connect(self.shutdown)
         self.tray.show()
-        self.widget.show()
-        self.widget.animate_in()
         self.main_window.show()
+        if self.window_state.widget_visible:
+            self.show_widget()
+        else:
+            self.main_window.set_widget_visibility(False)
+            self.tray.set_widget_visibility(False)
         if self._startup_hotkey_error:
             self.show_toast("Горячая клавиша недоступна: " + self._startup_hotkey_error)
         self.refresh()
@@ -1284,6 +1287,7 @@ class WidgetApp:
             self.widget._closing = False
             self.widget.show()
             self.widget.animate_in()
+        self._set_widget_visibility(True)
         self.widget.raise_()
         if address and any(server.address == address for server in self.config.servers):
             if self.widget.expanded != address:
@@ -1305,6 +1309,15 @@ class WidgetApp:
 
     def hide_widget(self) -> None:
         self.widget.hide()
+        self._set_widget_visibility(False)
+
+    def _set_widget_visibility(self, visible: bool) -> None:
+        changed = self.window_state.widget_visible != visible
+        self.window_state.widget_visible = visible
+        if changed:
+            self.remember_state()
+        self.main_window.set_widget_visibility(visible)
+        self.tray.set_widget_visibility(visible)
 
     def open_config(self) -> None:
         try:

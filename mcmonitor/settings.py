@@ -265,6 +265,7 @@ class SettingsDialog(QDialog):
         self._working = replace(
             self._working,
             hotkey_show_widget=hk,
+            widget_opacity=self.opacitySlider.value() / 100,
         )
         self.settingsChanged.emit(self._working)
         self.accept()

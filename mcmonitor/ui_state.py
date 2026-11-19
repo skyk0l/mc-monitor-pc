@@ -17,6 +17,7 @@ class WindowState:
     y: int | None = None
     opacity: float = DEFAULT_OPACITY
     always_on_top: bool = True
+    widget_visible: bool = True
 
     def clamped(self) -> "WindowState":
         return WindowState(
@@ -24,6 +25,7 @@ class WindowState:
             y=self.y,
             opacity=min(MAX_OPACITY, max(MIN_OPACITY, float(self.opacity))),
             always_on_top=bool(self.always_on_top),
+            widget_visible=bool(self.widget_visible),
         )
 
 
@@ -55,6 +57,7 @@ def load_state(path: Path) -> WindowState:
         y=_int_or_none(data.get("y")),
         opacity=_float(data.get("opacity"), DEFAULT_OPACITY),
         always_on_top=bool(data.get("always_on_top", True)),
+        widget_visible=bool(data.get("widget_visible", True)),
     ).clamped()
 
 
@@ -64,6 +67,7 @@ def save_state(path: Path, state: WindowState) -> None:
         "y": state.y,
         "opacity": round(state.opacity, 2),
         "always_on_top": state.always_on_top,
+        "widget_visible": state.widget_visible,
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

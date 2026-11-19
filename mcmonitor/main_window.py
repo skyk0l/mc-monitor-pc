@@ -336,18 +336,18 @@ class AuroraSurface(QWidget):
         base = QLinearGradient(
             QPointF(bounds.topLeft()), QPointF(bounds.bottomRight())
         )
-        base.setColorAt(0.0, QColor("#10151c"))
-        base.setColorAt(0.52, QColor("#101b20"))
-        base.setColorAt(1.0, QColor("#11151d"))
+        base.setColorAt(0.0, QColor("#172122"))
+        base.setColorAt(0.52, QColor("#132623"))
+        base.setColorAt(1.0, QColor("#181e25"))
         painter.fillRect(bounds, base)
 
         travel = (self.phase * 2.0) - 0.5
         green_center = QPointF(bounds.width() * (0.18 + 0.48 * travel), bounds.height() * 0.23)
         green = QRadialGradient(green_center, max(bounds.width(), bounds.height()) * 0.74)
         accent = QColor(self._accent)
-        accent.setAlpha(30)
+        accent.setAlpha(48)
         soft_accent = QColor(self._accent)
-        soft_accent.setAlpha(16)
+        soft_accent.setAlpha(27)
         clear_accent = QColor(self._accent)
         clear_accent.setAlpha(0)
         green.setColorAt(0.0, accent)
@@ -365,7 +365,7 @@ class AuroraSurface(QWidget):
         neighbor.setHsv((hue + 38) % 360 if hue >= 0 else 38, neighbor.hsvSaturation(),
                         neighbor.value())
         neighbor_glow = QColor(neighbor)
-        neighbor_glow.setAlpha(22)
+        neighbor_glow.setAlpha(34)
         neighbor_clear = QColor(neighbor)
         neighbor_clear.setAlpha(0)
         blue.setColorAt(0.0, neighbor_glow)
@@ -620,7 +620,13 @@ class CommunityDialog(QDialog):
     addServerRequested = Signal(object)
     avatarLoaded = Signal(object, object)
 
-    def __init__(self, followed_only: bool = False, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        followed_only: bool = False,
+        parent: QWidget | None = None,
+        initial_mode: int = 0,
+        initial_query: str = "",
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Сообщество MC Monitor")
         self.setModal(True)
@@ -658,6 +664,9 @@ class CommunityDialog(QDialog):
         self.query = ""
         if followed_only:
             self.tabs.setCurrentIndex(2)
+        elif initial_query:
+            self.tabs.setCurrentIndex(initial_mode)
+            self.search.setText(initial_query)
         else:
             self.set_status("Введи не менее двух символов для поиска.")
 
@@ -1016,9 +1025,13 @@ class MainWindow(QMainWindow):
         self.search_input.setPlaceholderText("Поиск серверов…")
         self.search_input.setMinimumWidth(120)
         self.search_input.setMaximumWidth(280)
+        self.search_input.setPlaceholderText(
+            "Мои серверы · Enter — общий поиск"
+        )
         self.search_input.setClearButtonEnabled(True)
         self.search_input.setVisible(False)
         self.search_input.textChanged.connect(self._on_search_changed)
+        self.search_input.returnPressed.connect(self._search_community)
         header.addWidget(self.search_input, 1)
         self.header_spacer = QWidget()
         self.header_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -1098,15 +1111,15 @@ class MainWindow(QMainWindow):
         empty_layout.addWidget(empty_icon)
         empty_text = QVBoxLayout()
         empty_text.setSpacing(5)
-        empty_title = QLabel("Пора в игру?")
-        empty_title.setObjectName("emptyTitle")
-        empty_text.addWidget(empty_title)
-        empty_description = QLabel(
+        self.empty_title = QLabel("Пора в игру?")
+        self.empty_title.setObjectName("emptyTitle")
+        empty_text.addWidget(self.empty_title)
+        self.empty_description = QLabel(
             "Добавь Minecraft-сервер, чтобы\nследить за онлайном и игроками."
         )
-        empty_description.setObjectName("emptyDescription")
-        empty_description.setWordWrap(True)
-        empty_text.addWidget(empty_description)
+        self.empty_description.setObjectName("emptyDescription")
+        self.empty_description.setWordWrap(True)
+        empty_text.addWidget(self.empty_description)
         empty_layout.addLayout(empty_text, 1)
         layout.addWidget(self.empty_label)
 
@@ -1128,9 +1141,14 @@ class MainWindow(QMainWindow):
         add_button.clicked.connect(self._add_server)
         layout.addWidget(add_button)
 
-        show_widget = _button("Плавающий виджет", "quietButton")
-        show_widget.clicked.connect(lambda: self.controller.show_widget())
-        layout.addWidget(show_widget)
+        window_state = getattr(self.controller, "window_state", None)
+        self.widget_toggle_button = _button(
+            "Убрать виджет" if getattr(window_state, "widget_visible", False)
+            else "Включить виджет",
+            "quietButton",
+        )
+        self.widget_toggle_button.clicked.connect(self.controller.toggle_widget)
+        layout.addWidget(self.widget_toggle_button)
 
         footer = QLabel("Закрытие окна свернёт MC Monitor в системный трей")
         footer.setAlignment(Qt.AlignCenter)
@@ -1215,7 +1233,12 @@ class MainWindow(QMainWindow):
         )
         dialog.status.setText("Сохраняю профиль…")
 
-    def _open_community(self, followed_only: bool = False) -> None:
+    def _open_community(
+        self,
+        followed_only: bool = False,
+        initial_mode: int = 0,
+        initial_query: str = "",
+    ) -> None:
         try:
             if cloud_sync.load_session(self.controller.config_path) is None:
                 QMessageBox.information(self, "Сообщество", "Сначала войди в аккаунт.")
@@ -1228,8 +1251,16 @@ class MainWindow(QMainWindow):
             self._community_dialog.raise_()
             if followed_only:
                 self._community_dialog.tabs.setCurrentIndex(2)
+            elif initial_query:
+                self._community_dialog.tabs.setCurrentIndex(initial_mode)
+                self._community_dialog.search.setText(initial_query)
             return
-        dialog = CommunityDialog(followed_only, self)
+        dialog = CommunityDialog(
+            followed_only,
+            self,
+            initial_mode=initial_mode,
+            initial_query=initial_query,
+        )
         self._community_dialog = dialog
         dialog.followRequested.connect(self._community_follow)
         dialog.serversRequested.connect(self._community_profile_servers)
@@ -1457,11 +1488,50 @@ class MainWindow(QMainWindow):
         self.controller.widget.update()
 
     def _on_search_changed(self, text: str) -> None:
-        # Живой поиск по серверам — фильтруем карточки
-        query = text.strip().lower()
+        query = text.strip().casefold()
+        visible_count = 0
         for address, card in self._cards.items():
-            visible = not query or query in card.server.name.lower() or query in card.server.address.lower()
+            server = card.server
+            searchable = [
+                server.name,
+                server.address,
+                server.protocol,
+                server.group_id or "",
+                *server.priority_players,
+            ]
+            status = self.controller.statuses.get(address)
+            if status is not None:
+                searchable.extend(status.unique_players)
+            visible = not query or any(
+                query in value.casefold()
+                for value in searchable
+                if value
+            )
             card.setVisible(visible)
+            visible_count += int(visible)
+        no_servers = not self.controller.config.servers
+        no_results = bool(query and not no_servers and visible_count == 0)
+        self.empty_title.setText(
+            "Ничего не найдено" if no_results else "Пора в игру?"
+        )
+        self.empty_description.setText(
+            "Нажми Enter для поиска серверов и игроков в общем каталоге."
+            if no_results
+            else "Добавь Minecraft-сервер, чтобы\nследить за онлайном и игроками."
+        )
+        self.empty_label.setVisible(no_servers or no_results)
+        self.scroll.setVisible(not no_servers and not no_results)
+
+    def _search_community(self) -> None:
+        query = self.search_input.text().strip()
+        if len(query) < 2:
+            QMessageBox.information(
+                self,
+                "Поиск в каталоге",
+                "Для поиска публичных серверов и игроков введи не менее двух символов.",
+            )
+            return
+        self._open_community(initial_mode=1, initial_query=query)
 
     def _update_account_button(self) -> None:
         try:
@@ -1482,6 +1552,14 @@ class MainWindow(QMainWindow):
         )
         self.account_button.setAccessibleName(
             "Аккаунт " + session.username if session else "Войти в аккаунт"
+        )
+
+    def set_widget_visibility(self, visible: bool) -> None:
+        self.widget_toggle_button.setText(
+            "Убрать виджет" if visible else "Включить виджет"
+        )
+        self.widget_toggle_button.setToolTip(
+            "Скрыть плавающий виджет" if visible else "Показать плавающий виджет"
         )
 
     def _toggle_search(self) -> None:
@@ -1664,6 +1742,7 @@ class MainWindow(QMainWindow):
             self.scroll.setFixedHeight(min(360, max(120, card_height)))
         else:
             self.scroll.setFixedHeight(0)
+        self._on_search_changed(self.search_input.text())
         desired_height = self.centralWidget().layout().sizeHint().height()
         self.resize(self.width(), min(760, max(580, desired_height)))
 
@@ -1949,7 +2028,8 @@ class TrayController:
         self.icon.setToolTip("MC Monitor")
         menu = QMenu()
         menu.addAction("Открыть MC Monitor", self.show_window)
-        menu.addAction("Показать плавающий виджет", self.show_widget)
+        self.widget_action = menu.addAction("Включить виджет")
+        self.widget_action.triggered.connect(self.controller.toggle_widget)
         menu.addAction("Обновить серверы", app_controller.request_refresh)
         menu.addAction(
             "Проверить обновления",
@@ -1974,8 +2054,10 @@ class TrayController:
         window.raise_()
         window.activateWindow()
 
-    def show_widget(self) -> None:
-        self.controller.show_widget()
+    def set_widget_visibility(self, visible: bool) -> None:
+        self.widget_action.setText(
+            "Убрать виджет" if visible else "Включить виджет"
+        )
 
     def _activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason in (

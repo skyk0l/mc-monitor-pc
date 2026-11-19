@@ -578,12 +578,14 @@ def test_window_state_roundtrip() -> None:
         state.x, state.y = 120, 340
         state.opacity = 0.75
         state.always_on_top = False
+        state.widget_visible = False
         save_state(path, state)
 
         again = load_state(path)
         assert (again.x, again.y) == (120, 340)
         assert again.opacity == 0.75
         assert again.always_on_top is False
+        assert again.widget_visible is False
 
 
 def test_window_state_clamp() -> None:
