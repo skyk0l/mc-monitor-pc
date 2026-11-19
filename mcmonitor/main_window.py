@@ -1460,23 +1460,22 @@ class MainWindow(QMainWindow):
 
     def _apply_settings(self, config: AppConfig) -> None:
         previous_hotkey = self.controller.config.hotkey_show_widget
+        hotkey_error: OSError | RuntimeError | ValueError | None = None
         try:
             self.controller.set_hotkey(config.hotkey_show_widget)
         except (OSError, RuntimeError, ValueError) as exc:
-            QMessageBox.warning(
-                self,
-                "Горячая клавиша недоступна",
-                f"Настройки не сохранены. Выберите другое сочетание:\n{exc}",
-            )
-            return
+            hotkey_error = exc
+            log.warning("Не удалось применить новую горячую клавишу: %s", exc)
+            config = replace(config, hotkey_show_widget=previous_hotkey)
         try:
             save_config(self.controller.config_path, config)
         except OSError as exc:
             log.exception("не удалось сохранить настройки")
-            try:
-                self.controller.set_hotkey(previous_hotkey)
-            except (OSError, RuntimeError, ValueError):
-                log.exception("не удалось восстановить прежнюю горячую клавишу")
+            if hotkey_error is None:
+                try:
+                    self.controller.set_hotkey(previous_hotkey)
+                except (OSError, RuntimeError, ValueError):
+                    log.exception("не удалось восстановить прежнюю горячую клавишу")
             QMessageBox.critical(
                 self, "Не удалось сохранить", f"Настройки не сохранены:\n{exc}"
             )
@@ -1486,6 +1485,10 @@ class MainWindow(QMainWindow):
         self.controller.reload_config()
         self.controller.widget.resize_to_content()
         self.controller.widget.update()
+        if hotkey_error is not None:
+            self.controller.show_toast(
+                "Остальные настройки сохранены. Сочетание занято — оставил прежнее."
+            )
 
     def _on_search_changed(self, text: str) -> None:
         query = text.strip().casefold()

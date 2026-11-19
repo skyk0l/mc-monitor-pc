@@ -1179,8 +1179,6 @@ class WidgetApp:
         else:
             self.main_window.set_widget_visibility(False)
             self.tray.set_widget_visibility(False)
-        if self._startup_hotkey_error:
-            self.show_toast("Горячая клавиша недоступна: " + self._startup_hotkey_error)
         self.refresh()
         QTimer.singleShot(
             5000,
@@ -1276,9 +1274,7 @@ class WidgetApp:
         self.widget.resize_to_content()
         self.widget.update()
         self.main_window.refresh_servers()
-        if hotkey_error is not None:
-            self.show_toast("Горячая клавиша не применена: " + str(hotkey_error))
-        else:
+        if hotkey_error is None:
             self.show_toast("Настройки перечитаны ✅")
         self.refresh()
 
