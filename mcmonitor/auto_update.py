@@ -7,6 +7,8 @@ import json
 import logging
 import os
 import re
+import subprocess
+import sys
 import tempfile
 import urllib.error
 import urllib.parse
@@ -36,6 +38,9 @@ _VERSION_PATTERN = re.compile(
 )
 _MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024
 _DOWNLOAD_TIMEOUT_SECONDS = 45
+_POWERSHELL = Path(os.environ.get("SystemRoot", r"C:\Windows")) / (
+    r"System32\WindowsPowerShell\v1.0\powershell.exe"
+)
 
 
 class UpdateError(RuntimeError):
@@ -64,6 +69,44 @@ def _version_key(value: str) -> tuple[int, int, int]:
     if not match:
         raise UpdateError(f"Некорректный номер версии: {value!r}")
     return tuple(int(part) for part in match.groups())
+
+
+def _powershell_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _replacement_script(
+    process_id: int, target: Path, downloaded: Path, expected_sha256: str
+) -> str:
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+        raise UpdateError("Некорректная SHA-256 сумма файла обновления.")
+    return f"""$ErrorActionPreference = 'Stop'
+$processId = {process_id}
+$target = {_powershell_literal(str(target))}
+$downloaded = {_powershell_literal(str(downloaded))}
+$expected = '{expected_sha256}'
+$backup = $target + '.previous'
+try {{
+    Wait-Process -Id $processId -ErrorAction SilentlyContinue
+    $actual = (Get-FileHash -LiteralPath $downloaded -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $expected) {{ throw 'Проверка SHA-256 не пройдена.' }}
+    if (Test-Path -LiteralPath $backup) {{ Remove-Item -LiteralPath $backup -Force }}
+    Move-Item -LiteralPath $target -Destination $backup -Force
+    try {{
+        Move-Item -LiteralPath $downloaded -Destination $target -Force
+    }} catch {{
+        Move-Item -LiteralPath $backup -Destination $target -Force
+        throw
+    }}
+    Start-Process -FilePath $target
+    Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+}} catch {{
+    Add-Type -AssemblyName PresentationFramework
+    [System.Windows.MessageBox]::Show("Update failed: $($_.Exception.Message)`nDownloaded file: $downloaded", 'MC Monitor', 'OK', 'Error') | Out-Null
+    if (Test-Path -LiteralPath $target) {{ Start-Process -FilePath $target }}
+}}
+Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
+"""
 
 
 def _release_info(payload: Any, repository: str) -> dict[str, Any]:
@@ -107,8 +150,8 @@ def _release_info(payload: Any, repository: str) -> dict[str, Any]:
         raise UpdateError("Размер файла обновления выходит за допустимые пределы.")
 
     digest = str(asset.get("digest") or "").strip().lower()
-    if digest and not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
-        raise UpdateError("GitHub указал некорректную SHA-256 сумму файла.")
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+        raise UpdateError("В GitHub-релизе отсутствует корректная SHA-256 сумма.")
 
     return {
         "version": version,
@@ -242,7 +285,7 @@ class DownloadThread(QThread):
 
 
 class UpdateDialog(QDialog):
-    """Show release notes and let the user download the portable executable."""
+    """Download a verified release and replace the running portable executable."""
 
     def __init__(self, release: dict[str, Any], parent=None) -> None:
         super().__init__(parent)
@@ -267,12 +310,12 @@ class UpdateDialog(QDialog):
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
         layout.addWidget(self.progress)
-        self.status = QLabel("Файл будет скачан в папку «Загрузки».")
+        self.status = QLabel("Обновление будет проверено и установлено с перезапуском.")
         layout.addWidget(self.status)
 
         buttons = QDialogButtonBox()
         self.download_button = buttons.addButton(
-            "Скачать", QDialogButtonBox.AcceptRole
+            "Скачать и установить", QDialogButtonBox.AcceptRole
         )
         self.close_button = buttons.addButton(
             "Закрыть", QDialogButtonBox.RejectRole
@@ -303,11 +346,61 @@ class UpdateDialog(QDialog):
 
     def _on_downloaded(self, path: str) -> None:
         self._downloaded_path = Path(path)
-        self.status.setText(f"Файл скачан и проверен:\n{path}")
-        self.download_button.setText("Открыть папку")
-        self.download_button.setEnabled(True)
-        self.close_button.setEnabled(True)
+        if sys.platform != "win32" or not getattr(sys, "frozen", False):
+            self.status.setText(f"Файл скачан и проверен:\n{path}")
+            self.download_button.setText("Открыть папку")
+            self.download_button.setEnabled(True)
+            self.close_button.setEnabled(True)
+            return
+
+        try:
+            target = Path(sys.executable).resolve()
+            script_text = _replacement_script(
+                os.getpid(),
+                target,
+                self._downloaded_path.resolve(),
+                str(self._release["sha256"]),
+            )
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8-sig",
+                suffix=".ps1",
+                prefix="mc-monitor-update-",
+                delete=False,
+            ) as script:
+                script_path = Path(script.name)
+                script.write(script_text)
+            subprocess.Popen(
+                [
+                    str(_POWERSHELL),
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-File",
+                    str(script_path),
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                creationflags=subprocess.DETACHED_PROCESS
+                | subprocess.CREATE_NEW_PROCESS_GROUP,
+            )
+        except (OSError, ValueError, UpdateError) as exc:
+            log.exception("Не удалось запустить замену приложения")
+            self.status.setText(f"Файл проверен, но автоустановка не запустилась: {exc}")
+            self.download_button.setText("Открыть папку")
+            self.download_button.setEnabled(True)
+            self.close_button.setEnabled(True)
+            return
+
+        self.status.setText("Обновление готово. Перезапускаю MC Monitor…")
+        self.download_button.setEnabled(False)
+        self.close_button.setEnabled(False)
         QApplication.beep()
+        QApplication.instance().quit()
 
     def _on_error(self, message: str) -> None:
         self.status.setText("Ошибка: " + message)

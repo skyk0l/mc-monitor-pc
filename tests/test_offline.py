@@ -10,7 +10,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from mcmonitor import api  # noqa: E402
-from mcmonitor.auto_update import UpdateError, _release_info, _version_key  # noqa: E402
+from mcmonitor.auto_update import (  # noqa: E402
+    UpdateError,
+    _release_info,
+    _replacement_script,
+    _version_key,
+)
 from mcmonitor import cloud_sync  # noqa: E402
 from mcmonitor.config import (  # noqa: E402
     AppConfig,
@@ -101,6 +106,19 @@ def test_update_rejects_untrusted_asset_url() -> None:
     except UpdateError:
         return
     raise AssertionError("untrusted release URLs must be rejected")
+
+
+def test_update_replacement_waits_and_verifies_before_swapping() -> None:
+    script = _replacement_script(
+        123,
+        Path("C:/Program Files/MC Monitor/MC-Monitor.exe"),
+        Path("C:/Users/Test/Downloads/MC Monitor.exe"),
+        "a" * 64,
+    )
+    assert "Wait-Process -Id $processId" in script
+    assert "Get-FileHash -LiteralPath $downloaded -Algorithm SHA256" in script
+    assert "Move-Item -LiteralPath $downloaded -Destination $target -Force" in script
+    assert "Start-Process -FilePath $target" in script
 
 
 def test_parse_mcsrvstat() -> None:
@@ -614,6 +632,7 @@ def main() -> None:
         test_bedrock_provider,
         test_update_release_metadata,
         test_update_rejects_untrusted_asset_url,
+        test_update_replacement_waits_and_verifies_before_swapping,
         test_config_parse,
         test_config_roundtrip,
         test_config_interval_floor,
