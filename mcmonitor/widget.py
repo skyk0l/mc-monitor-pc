@@ -36,7 +36,7 @@ from PySide6.QtGui import (
     QPen,
     QRadialGradient,
 )
-from PySide6.QtWidgets import QApplication, QMenu, QWidget
+from PySide6.QtWidgets import QApplication, QMessageBox, QMenu, QWidget
 
 from . import __version__, api
 from .auto_update import check_for_updates
@@ -568,7 +568,7 @@ class StatusWidget(QWidget):
             painter.drawText(
                 QPointF(card.left() + 34, top + 42),
                 "Добавь сервер в окне приложения" if not self.app.config.servers
-                else "Выбери «Показать в виджете» в меню сервера",
+                else "Добавь сервер в виджет на его карточке",
             )
             return
         self._player_area = QRectF()
@@ -1179,6 +1179,14 @@ class WidgetApp:
         else:
             self.main_window.set_widget_visibility(False)
             self.tray.set_widget_visibility(False)
+        if self._startup_hotkey_error:
+            QMessageBox.warning(
+                self.main_window,
+                "Горячая клавиша недоступна",
+                f"Не удалось зарегистрировать {self.config.hotkey_show_widget}.\n"
+                f"{self._startup_hotkey_error}\n"
+                "Выберите другое сочетание клавиш в настройках.",
+            )
         self.refresh()
         QTimer.singleShot(
             5000,
@@ -1271,8 +1279,11 @@ class WidgetApp:
         self.widget.resize_to_content()
         self.widget.update()
         self.main_window.refresh_servers()
-        if hotkey_error is None:
-            self.show_toast("Настройки перечитаны ✅")
+        if hotkey_error is not None:
+            self.tray.show_message(
+                "Горячая клавиша недоступна",
+                f"{config.hotkey_show_widget}: {hotkey_error}",
+            )
         self.refresh()
 
     def show_widget(self, address: str | None = None) -> None:

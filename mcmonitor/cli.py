@@ -13,15 +13,16 @@ from .config import (
     AppConfig,
     ConfigError,
     ServerConfig,
-    app_dir,
     default_config_path,
     load_config,
+    user_data_dir,
 )
 
 LOG_NAME = "mcmonitor.log"
 
 
 def setup_logging(log_path: Path) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     handlers: list[logging.Handler] = [
         RotatingFileHandler(log_path, maxBytes=1_000_000, backupCount=2, encoding="utf-8")
     ]
@@ -106,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.once:
         return run_once(config)
 
-    setup_logging(app_dir() / LOG_NAME)
+    setup_logging(user_data_dir() / LOG_NAME)
 
     if args.tray:
         from .tray import TrayApp

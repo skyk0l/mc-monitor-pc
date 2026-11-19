@@ -86,24 +86,24 @@ QLabel {
     color: #e8eee9;
     background: transparent;
     font-family: "Segoe UI";
-    font-weight: 600;
+    font-weight: 500;
 }
 QFrame#serverCard {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-        stop:0 rgba(32, 46, 49, 245), stop:1 rgba(22, 32, 37, 245));
-    border: 1px solid rgba(153, 212, 184, 48);
-    border-radius: 20px;
+        stop:0 rgba(31, 47, 49, 248), stop:1 rgba(20, 31, 36, 248));
+    border: 1px solid rgba(153, 212, 184, 55);
+    border-radius: 16px;
 }
 QFrame#serverCard:hover {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-        stop:0 rgba(39, 58, 57, 250), stop:1 rgba(25, 40, 43, 250));
+        stop:0 rgba(37, 58, 56, 250), stop:1 rgba(24, 39, 42, 250));
     border-color: rgba(157, 224, 185, 112);
 }
 QFrame#summaryCard {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
         stop:0 rgba(33, 54, 51, 238), stop:1 rgba(24, 43, 48, 238));
     border: 1px solid rgba(155, 216, 189, 56);
-    border-radius: 18px;
+    border-radius: 16px;
 }
 QFrame#emptyCard {
     background: rgba(25, 39, 42, 220);
@@ -166,6 +166,20 @@ QPushButton#quietButton {
     color: #c9ded4;
     background: rgba(36, 57, 58, 210);
     border-color: rgba(133, 188, 177, 52);
+}
+QPushButton#widgetMembershipButton {
+    color: #bce2cc;
+    background: rgba(54, 91, 73, 72);
+    border: 1px solid rgba(142, 204, 169, 72);
+    border-radius: 9px;
+    padding: 6px 10px;
+    font-size: 10px;
+    font-weight: 700;
+}
+QPushButton#widgetMembershipButton:hover {
+    color: #effff4;
+    background: rgba(75, 125, 97, 128);
+    border-color: rgba(176, 230, 194, 150);
 }
 QPushButton#removeButton {
     color: #f0b5ac;
@@ -822,7 +836,7 @@ class CommunityDialog(QDialog):
 
 
 class ServerCard(QFrame):
-    widgetRequested = Signal(str)
+    widgetMembershipRequested = Signal(str, bool)
     removeRequested = Signal(str)
     menuRequested = Signal(str, object)  # address, QPoint
 
@@ -897,9 +911,13 @@ class ServerCard(QFrame):
 
         actions = QHBoxLayout()
         actions.addStretch(1)
-        widget_button = _button("ПЛАВАЮЩИЙ ВИДЖЕТ", "quietButton")
+        widget_button = _button(
+            "Убрать из виджета" if server.show_in_widget else "Добавить в виджет",
+            "widgetMembershipButton",
+        )
         widget_button.clicked.connect(
-            lambda _checked=False, address=server.address: self.widgetRequested.emit(address)
+            lambda _checked=False, address=server.address, included=server.show_in_widget:
+                self.widgetMembershipRequested.emit(address, not included)
         )
         actions.addWidget(widget_button)
         remove_button = _button("Удалить", "removeButton")
@@ -1733,7 +1751,7 @@ class MainWindow(QMainWindow):
         card_height = 0
         for server in servers:
             card = ServerCard(server, self.list_content)
-            card.widgetRequested.connect(self.controller.show_widget)
+            card.widgetMembershipRequested.connect(self._set_widget_membership)
             card.removeRequested.connect(self._remove_server)
             card.menuRequested.connect(self._show_server_menu)
             card.update_status(self.controller.statuses.get(server.address))
@@ -1843,10 +1861,6 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        widget_text = "Убрать из виджета" if server.show_in_widget else "Показать в виджете"
-        widget_action = menu.addAction(widget_text)
-        widget_action.triggered.connect(lambda: self._toggle_widget(server))
-
         priorities_action = menu.addAction("Приоритеты игроков…")
         priorities_action.triggered.connect(lambda: self._show_priorities(server))
 
@@ -1865,14 +1879,16 @@ class MainWindow(QMainWindow):
 
         menu.exec(pos)
 
-    def _toggle_widget(self, server: ServerConfig) -> None:
+    def _set_widget_membership(self, address: str, included: bool) -> None:
         servers = list(self.controller.config.servers)
-        updated = []
-        for s in servers:
-            if s.address == server.address:
-                s = replace(s, show_in_widget=not s.show_in_widget)
-            updated.append(s)
-        self._save_config(updated)
+        updated = [
+            replace(server, show_in_widget=included)
+            if server.address == address
+            else server
+            for server in servers
+        ]
+        if updated != servers:
+            self._save_config(updated)
 
     def _show_priorities(self, server: ServerConfig) -> None:
         dialog = QDialog(self)

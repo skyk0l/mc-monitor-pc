@@ -54,10 +54,27 @@ jobs:
           --add-data "assets;assets" --add-data "version.json;."
           mcmonitor/__main__.py
 
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path -LiteralPath $compiler)) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (-not (Test-Path -LiteralPath $compiler)) {
+            throw "Inno Setup compiler was not found."
+          }
+          $version = python -c "from mcmonitor import __version__; print(__version__)"
+          & $compiler "/DAppVersion=$version" "installer.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - uses: actions/upload-artifact@v7
         with:
           name: MC-Monitor-Windows
-          path: dist/MC-Monitor.exe
+          path: |
+            dist/MC-Monitor.exe
+            dist/MC-Monitor-Setup-*.exe
           if-no-files-found: error
 
       - name: Publish Windows release
@@ -65,5 +82,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          files: dist/MC-Monitor.exe
+          files: |
+            dist/MC-Monitor.exe
+            dist/MC-Monitor-Setup-*.exe
           generate_release_notes: true

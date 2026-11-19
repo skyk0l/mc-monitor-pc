@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import re
-import subprocess
 import sys
 import tempfile
 import urllib.error
@@ -29,7 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__
-from .config import resource_path
+from .config import is_installed_by_setup, resource_path
 
 log = logging.getLogger(__name__)
 _REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -38,9 +37,6 @@ _VERSION_PATTERN = re.compile(
 )
 _MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024
 _DOWNLOAD_TIMEOUT_SECONDS = 45
-_POWERSHELL = Path(os.environ.get("SystemRoot", r"C:\Windows")) / (
-    r"System32\WindowsPowerShell\v1.0\powershell.exe"
-)
 
 
 class UpdateError(RuntimeError):
@@ -71,44 +67,6 @@ def _version_key(value: str) -> tuple[int, int, int]:
     return tuple(int(part) for part in match.groups())
 
 
-def _powershell_literal(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
-
-
-def _replacement_script(
-    process_id: int, target: Path, downloaded: Path, expected_sha256: str
-) -> str:
-    if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
-        raise UpdateError("Некорректная SHA-256 сумма файла обновления.")
-    return f"""$ErrorActionPreference = 'Stop'
-$processId = {process_id}
-$target = {_powershell_literal(str(target))}
-$downloaded = {_powershell_literal(str(downloaded))}
-$expected = '{expected_sha256}'
-$backup = $target + '.previous'
-try {{
-    Wait-Process -Id $processId -ErrorAction SilentlyContinue
-    $actual = (Get-FileHash -LiteralPath $downloaded -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($actual -ne $expected) {{ throw 'Проверка SHA-256 не пройдена.' }}
-    if (Test-Path -LiteralPath $backup) {{ Remove-Item -LiteralPath $backup -Force }}
-    Move-Item -LiteralPath $target -Destination $backup -Force
-    try {{
-        Move-Item -LiteralPath $downloaded -Destination $target -Force
-    }} catch {{
-        Move-Item -LiteralPath $backup -Destination $target -Force
-        throw
-    }}
-    Start-Process -FilePath $target
-    Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
-}} catch {{
-    Add-Type -AssemblyName PresentationFramework
-    [System.Windows.MessageBox]::Show("Update failed: $($_.Exception.Message)`nDownloaded file: $downloaded", 'MC Monitor', 'OK', 'Error') | Out-Null
-    if (Test-Path -LiteralPath $target) {{ Start-Process -FilePath $target }}
-}}
-Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
-"""
-
-
 def _release_info(payload: Any, repository: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise UpdateError("GitHub вернул некорректные данные о релизе.")
@@ -121,16 +79,17 @@ def _release_info(payload: Any, repository: str) -> dict[str, Any]:
     assets = payload.get("assets")
     if not isinstance(assets, list):
         raise UpdateError("У релиза нет списка файлов.")
+    installer_name = f"MC-Monitor-Setup-{version}.exe"
     asset = next(
         (
             item
             for item in assets
-            if isinstance(item, dict) and item.get("name") == "MC-Monitor.exe"
+            if isinstance(item, dict) and item.get("name") == installer_name
         ),
         None,
     )
     if asset is None:
-        raise UpdateError("В релизе нет файла MC-Monitor.exe.")
+        raise UpdateError(f"В релизе нет установщика {installer_name}.")
 
     url = str(asset.get("browser_download_url") or "")
     parsed_url = urllib.parse.urlparse(url)
@@ -155,6 +114,7 @@ def _release_info(payload: Any, repository: str) -> dict[str, Any]:
 
     return {
         "version": version,
+        "installer_name": installer_name,
         "notes": str(payload.get("body") or ""),
         "url": url,
         "size": size,
@@ -199,7 +159,7 @@ class UpdateChecker(QThread):
 
 
 class DownloadThread(QThread):
-    """Stream a release asset to Downloads and verify its published digest."""
+    """Download a release installer and verify its published digest."""
 
     progress = Signal(int)
     downloaded = Signal(str)
@@ -217,7 +177,7 @@ class DownloadThread(QThread):
             downloads = Path.home() / "Downloads"
             downloads.mkdir(parents=True, exist_ok=True)
             version = str(self._release["version"])
-            destination = downloads / f"MC-Monitor-{version}.exe"
+            destination = downloads / str(self._release["installer_name"])
 
             request = urllib.request.Request(
                 str(self._release["url"]),
@@ -285,11 +245,15 @@ class DownloadThread(QThread):
 
 
 class UpdateDialog(QDialog):
-    """Download a verified release and replace the running portable executable."""
+    """Download a verified installer for the running desktop release."""
 
-    def __init__(self, release: dict[str, Any], parent=None) -> None:
+    def __init__(
+        self, release: dict[str, Any], parent=None, *, install_only: bool = False
+    ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Доступно обновление")
+        self.setWindowTitle(
+            "Установка MC Monitor" if install_only else "Доступно обновление"
+        )
         self.setMinimumWidth(420)
         self._release = release
         self._downloaded_path: Path | None = None
@@ -299,10 +263,14 @@ class UpdateDialog(QDialog):
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(12)
         notes = str(release.get("notes") or "").strip()
+        description = (
+            f"Версия {release['version']} готова к установке."
+            if install_only
+            else f"Доступна версия {release['version']}."
+        )
         layout.addWidget(
             QLabel(
-                f"Доступна версия {release['version']}."
-                + (f"\n\n{notes}" if notes else "")
+                description + (f"\n\n{notes}" if notes else "")
             )
         )
 
@@ -310,12 +278,16 @@ class UpdateDialog(QDialog):
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
         layout.addWidget(self.progress)
-        self.status = QLabel("Обновление будет проверено и установлено с перезапуском.")
+        self.status = QLabel(
+            "Проверенный установщик откроет мастер: можно выбрать папку, "
+            "а после установки запустить MC Monitor."
+        )
         layout.addWidget(self.status)
 
         buttons = QDialogButtonBox()
         self.download_button = buttons.addButton(
-            "Скачать и установить", QDialogButtonBox.AcceptRole
+            "Открыть установщик" if install_only else "Скачать и установить",
+            QDialogButtonBox.AcceptRole,
         )
         self.close_button = buttons.addButton(
             "Закрыть", QDialogButtonBox.RejectRole
@@ -355,51 +327,22 @@ class UpdateDialog(QDialog):
 
         try:
             target = Path(sys.executable).resolve()
-            script_text = _replacement_script(
-                os.getpid(),
-                target,
-                self._downloaded_path.resolve(),
-                str(self._release["sha256"]),
+            os.startfile(
+                str(self._downloaded_path.resolve()),
+                "runas",
+                f'/DIR="{target.parent}"',
             )
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8-sig",
-                suffix=".ps1",
-                prefix="mc-monitor-update-",
-                delete=False,
-            ) as script:
-                script_path = Path(script.name)
-                script.write(script_text)
-            subprocess.Popen(
-                [
-                    str(_POWERSHELL),
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-WindowStyle",
-                    "Hidden",
-                    "-File",
-                    str(script_path),
-                ],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                close_fds=True,
-                creationflags=subprocess.DETACHED_PROCESS
-                | subprocess.CREATE_NEW_PROCESS_GROUP,
-            )
-        except (OSError, ValueError, UpdateError) as exc:
-            log.exception("Не удалось запустить замену приложения")
-            self.status.setText(f"Файл проверен, но автоустановка не запустилась: {exc}")
+        except (OSError, ValueError) as exc:
+            log.exception("Не удалось запустить установщик")
+            self.status.setText(f"Файл проверен, но установщик не запустился: {exc}")
             self.download_button.setText("Открыть папку")
             self.download_button.setEnabled(True)
             self.close_button.setEnabled(True)
             return
 
-        self.status.setText("Обновление готово. Перезапускаю MC Monitor…")
+        self.status.setText("Открываю мастер установки…")
         self.download_button.setEnabled(False)
         self.close_button.setEnabled(False)
-        QApplication.beep()
         QApplication.instance().quit()
 
     def _on_error(self, message: str) -> None:
@@ -442,7 +385,14 @@ def check_for_updates(parent=None, *, silent: bool = False) -> None:
             on_error(str(exc))
             return
         if not available:
-            if not silent:
+            needs_install = (
+                sys.platform == "win32"
+                and getattr(sys, "frozen", False)
+                and not is_installed_by_setup()
+            )
+            if needs_install:
+                UpdateDialog(release, parent, install_only=True).exec()
+            elif not silent:
                 QMessageBox.information(parent, "Обновления", "Установлена последняя версия.")
             return
         dialog = UpdateDialog(release, parent)

@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import os
+import ctypes
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -13,7 +14,6 @@ from mcmonitor import api  # noqa: E402
 from mcmonitor.auto_update import (  # noqa: E402
     UpdateError,
     _release_info,
-    _replacement_script,
     _version_key,
 )
 from mcmonitor import cloud_sync  # noqa: E402
@@ -25,7 +25,7 @@ from mcmonitor.config import (  # noqa: E402
     save_config,
 )
 from mcmonitor.icon import make_icon, save_ico  # noqa: E402
-from mcmonitor.hotkeys import parse_hotkey  # noqa: E402
+from mcmonitor.hotkeys import _native_message_address, parse_hotkey  # noqa: E402
 from mcmonitor.models import ServerStatus  # noqa: E402
 from mcmonitor.notify import change_notice, new_players  # noqa: E402
 from mcmonitor.ui_state import WindowState, load_state, save_state  # noqa: E402
@@ -62,6 +62,12 @@ def test_global_hotkey_parsing() -> None:
         raise AssertionError(f"invalid hotkey accepted: {invalid}")
 
 
+def test_native_hotkey_message_pointer() -> None:
+    assert _native_message_address(123) == 123
+    assert _native_message_address(ctypes.c_void_p(123)) == 123
+    assert _native_message_address(object()) is None
+
+
 def test_update_release_metadata() -> None:
     digest = "a" * 64
     release = _release_info(
@@ -71,10 +77,10 @@ def test_update_release_metadata() -> None:
             "html_url": "https://github.com/skyk0l/mc-monitor/releases/tag/v1.2.0",
             "assets": [
                 {
-                    "name": "MC-Monitor.exe",
+                    "name": "MC-Monitor-Setup-1.2.0.exe",
                     "browser_download_url": (
                         "https://github.com/skyk0l/mc-monitor/releases/download/"
-                        "v1.2.0/MC-Monitor.exe"
+                        "v1.2.0/MC-Monitor-Setup-1.2.0.exe"
                     ),
                     "size": 20,
                     "digest": "sha256:" + digest,
@@ -84,6 +90,7 @@ def test_update_release_metadata() -> None:
         "skyk0l/mc-monitor",
     )
     assert release["version"] == "1.2.0"
+    assert release["installer_name"] == "MC-Monitor-Setup-1.2.0.exe"
     assert release["sha256"] == digest
     assert _version_key("v1.2.0") > _version_key("1.1.9")
 
@@ -95,8 +102,8 @@ def test_update_rejects_untrusted_asset_url() -> None:
                 "tag_name": "v1.2.0",
                 "assets": [
                     {
-                        "name": "MC-Monitor.exe",
-                        "browser_download_url": "https://example.com/MC-Monitor.exe",
+                        "name": "MC-Monitor-Setup-1.2.0.exe",
+                        "browser_download_url": "https://example.com/MC-Monitor-Setup-1.2.0.exe",
                         "size": 20,
                     }
                 ],
@@ -106,19 +113,6 @@ def test_update_rejects_untrusted_asset_url() -> None:
     except UpdateError:
         return
     raise AssertionError("untrusted release URLs must be rejected")
-
-
-def test_update_replacement_waits_and_verifies_before_swapping() -> None:
-    script = _replacement_script(
-        123,
-        Path("C:/Program Files/MC Monitor/MC-Monitor.exe"),
-        Path("C:/Users/Test/Downloads/MC Monitor.exe"),
-        "a" * 64,
-    )
-    assert "Wait-Process -Id $processId" in script
-    assert "Get-FileHash -LiteralPath $downloaded -Algorithm SHA256" in script
-    assert "Move-Item -LiteralPath $downloaded -Destination $target -Force" in script
-    assert "Start-Process -FilePath $target" in script
 
 
 def test_parse_mcsrvstat() -> None:
@@ -390,6 +384,45 @@ def test_config_broken_json() -> None:
             pass
         else:
             raise AssertionError("битый JSON должен давать ConfigError")
+
+
+def test_installed_config_migrates_legacy_data() -> None:
+    from unittest.mock import patch
+
+    from mcmonitor import config
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        legacy = root / "portable"
+        appdata = root / "roaming"
+        legacy.mkdir()
+        for name in (
+            "servers.json",
+            "window.json",
+            "account.session",
+            "sync_state.json",
+            "mcmonitor.log",
+        ):
+            (legacy / name).write_text(name, encoding="utf-8")
+        destination = appdata / "MC Monitor"
+        destination.mkdir(parents=True)
+        (destination / "account.session").write_text("new session", encoding="utf-8")
+
+        with (
+            patch.object(config, "app_dir", return_value=legacy),
+            patch.object(config.sys, "frozen", True, create=True),
+            patch.dict(os.environ, {"APPDATA": str(appdata)}),
+        ):
+            path = config.default_config_path()
+            assert path == destination / "servers.json"
+            assert path.read_text(encoding="utf-8") == "servers.json"
+            assert (destination / "window.json").read_text(encoding="utf-8") == "window.json"
+            assert (destination / "sync_state.json").read_text(encoding="utf-8") == "sync_state.json"
+            assert (destination / "mcmonitor.log").read_text(encoding="utf-8") == "mcmonitor.log"
+            assert (destination / "account.session").read_text(encoding="utf-8") == "new session"
+            assert not config.is_installed_by_setup()
+            (legacy / "installed.marker").write_text("1.3.6", encoding="utf-8")
+            assert config.is_installed_by_setup()
 
 
 def test_cloud_account_identifiers() -> None:
@@ -696,6 +729,7 @@ def test_window_state_clamp() -> None:
 def main() -> None:
     tests = [
         test_global_hotkey_parsing,
+        test_native_hotkey_message_pointer,
         test_parse_mcsrvstat,
         test_parse_mcstatus,
         test_player_list_helpers,
@@ -708,13 +742,13 @@ def main() -> None:
         test_bedrock_provider,
         test_update_release_metadata,
         test_update_rejects_untrusted_asset_url,
-        test_update_replacement_waits_and_verifies_before_swapping,
         test_config_parse,
         test_config_roundtrip,
         test_config_interval_floor,
         test_widget_reload_preserves_status_cache,
         test_priority_alert_uses_windows_notification_when_widget_is_visible,
         test_config_broken_json,
+        test_installed_config_migrates_legacy_data,
         test_cloud_account_identifiers,
         test_cloud_server_merge,
         test_cloud_protocol_contract,

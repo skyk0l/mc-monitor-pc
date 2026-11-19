@@ -1,7 +1,9 @@
-"""Настройки приложения: servers.json рядом с программой."""
+"""Пути к настройкам и пользовательским данным приложения."""
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -183,8 +185,47 @@ def resource_path(relative_path: str) -> Path:
     return root / relative_path
 
 
+def user_data_dir() -> Path:
+    if not getattr(sys, "frozen", False):
+        return app_dir()
+    appdata = os.environ.get("APPDATA")
+    root = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+    return root / "MC Monitor"
+
+
+def is_installed_by_setup() -> bool:
+    return (app_dir() / "installed.marker").is_file()
+
+
+def _migrate_legacy_data(source_dir: Path, destination_dir: Path) -> None:
+    filenames = (
+        "servers.json",
+        "window.json",
+        "account.session",
+        "sync_state.json",
+        "mcmonitor.log",
+    )
+    pending = [
+        (source_dir / name, destination_dir / name)
+        for name in filenames
+        if (source_dir / name).is_file() and not (destination_dir / name).exists()
+    ]
+    if not pending:
+        return
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    for source, destination in pending:
+        try:
+            shutil.copy2(source, destination)
+        except OSError as exc:
+            raise ConfigError(f"Не удалось перенести файл {source.name}: {exc}") from exc
+
+
 def default_config_path() -> Path:
-    return app_dir() / "servers.json"
+    data_dir = user_data_dir()
+    legacy_dir = app_dir()
+    if data_dir != legacy_dir:
+        _migrate_legacy_data(legacy_dir, data_dir)
+    return data_dir / "servers.json"
 
 
 def load_config(path: Path) -> AppConfig:

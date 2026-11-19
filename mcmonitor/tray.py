@@ -166,7 +166,6 @@ class TrayApp:
             return
         self._redraw()
         self._wake.set()
-        self._notify("Настройки перечитаны ✅", "MC Monitor")
 
     def _on_test_notification(self, icon: pystray.Icon, item: MenuItem) -> None:
         self._notify("Уведомления работают 👍", "MC Monitor")

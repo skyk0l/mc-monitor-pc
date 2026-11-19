@@ -11,6 +11,7 @@ from PySide6.QtCore import QAbstractNativeEventFilter, QCoreApplication
 
 _WM_HOTKEY = 0x0312
 _HOTKEY_ID = 0x4D43
+_MOD_NOREPEAT = 0x4000
 _MODIFIERS = {
     "ctrl": 0x0002,
     "control": 0x0002,
@@ -70,6 +71,14 @@ def parse_hotkey(sequence: str) -> tuple[int, int]:
     return modifiers, key
 
 
+def _native_message_address(message: object) -> int | None:
+    try:
+        return int(message)
+    except (TypeError, ValueError):
+        address = getattr(message, "value", None)
+        return address if isinstance(address, int) else None
+
+
 class GlobalHotkey(QAbstractNativeEventFilter):
     def __init__(
         self,
@@ -109,7 +118,9 @@ class GlobalHotkey(QAbstractNativeEventFilter):
         self._sequence = sequence
 
     def _register(self, modifiers: int, key: int) -> None:
-        if not self._user32.RegisterHotKey(None, _HOTKEY_ID, modifiers, key):
+        if not self._user32.RegisterHotKey(
+            None, _HOTKEY_ID, modifiers | _MOD_NOREPEAT, key
+        ):
             error = ctypes.get_last_error()
             raise OSError(error, "Не удалось зарегистрировать глобальное сочетание клавиш.")
         self._registered = True
@@ -124,7 +135,7 @@ class GlobalHotkey(QAbstractNativeEventFilter):
             self._application.removeNativeEventFilter(self)
 
     def nativeEventFilter(self, event_type, message):  # noqa: ANN001
-        address = message if isinstance(message, int) else getattr(message, "value", None)
+        address = _native_message_address(message)
         if not address:
             return False, 0
         native_message = ctypes.cast(
