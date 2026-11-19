@@ -7,6 +7,8 @@ from dataclasses import replace
 
 from PySide6.QtCore import (
     QEasingCurve,
+    QBuffer,
+    QIODevice,
     QObject,
     QPoint,
     QPointF,
@@ -17,17 +19,22 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor,
+    QImage,
     QIcon,
     QLinearGradient,
     QPainter,
+    QPixmap,
     QRadialGradient,
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFrame,
+    QFileDialog,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -38,6 +45,8 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSystemTrayIcon,
+    QTabWidget,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
     QToolButton,
@@ -423,6 +432,321 @@ class _CloudBridge(QObject):
     completed = Signal(object)
 
 
+class ProfileDialog(QDialog):
+    saveRequested = Signal()
+    avatarSelected = Signal(bytes)
+
+    def __init__(self, username: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Мой профиль")
+        self.setModal(True)
+        self.setMinimumWidth(390)
+        self.avatar_bytes: bytes | None = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.setSpacing(12)
+        self.identity = QLabel("@" + username)
+        self.identity.setStyleSheet("color: #9db1a7;")
+        layout.addWidget(self.identity)
+
+        self.avatar_preview = QLabel("MM")
+        self.avatar_preview.setFixedSize(72, 72)
+        self.avatar_preview.setAlignment(Qt.AlignCenter)
+        self.avatar_preview.setStyleSheet(
+            "background: rgba(126,224,163,32); border: 1px solid rgba(126,224,163,90); "
+            "border-radius: 36px; font-size: 20px; font-weight: 900;"
+        )
+        layout.addWidget(self.avatar_preview, 0, Qt.AlignHCenter)
+        avatar_button = _button("Выбрать JPEG-аватар", "quietButton")
+        avatar_button.clicked.connect(self._choose_avatar)
+        layout.addWidget(avatar_button)
+
+        form = QFormLayout()
+        form.setSpacing(10)
+        self.display_name = QLineEdit()
+        self.display_name.setMaxLength(32)
+        self.display_name.setPlaceholderText("Как тебя показывать")
+        self.bio = QTextEdit()
+        self.bio.setPlaceholderText("Коротко о себе")
+        self.bio.setMaximumHeight(90)
+        self.share_servers = QCheckBox("Публично показывать адреса моих серверов")
+        form.addRow("Имя", self.display_name)
+        form.addRow("О себе", self.bio)
+        form.addRow("", self.share_servers)
+        layout.addLayout(form)
+        privacy_note = QLabel(
+            "Выключено по умолчанию. При включении адреса будут видны "
+            "авторизованным пользователям в поиске."
+        )
+        privacy_note.setWordWrap(True)
+        privacy_note.setStyleSheet("color: #9db1a7; font-size: 11px;")
+        layout.addWidget(privacy_note)
+
+        self.status = QLabel("Загружаю профиль…")
+        self.status.setWordWrap(True)
+        self.status.setStyleSheet("color: #9db1a7;")
+        layout.addWidget(self.status)
+
+        buttons = QHBoxLayout()
+        save = _button("Сохранить", "primaryButton")
+        save.clicked.connect(self.saveRequested.emit)
+        buttons.addWidget(save)
+        close = _button("Закрыть", "quietButton")
+        close.clicked.connect(self.reject)
+        buttons.addWidget(close)
+        layout.addLayout(buttons)
+
+    def set_profile(
+        self, profile: cloud_sync.PublicProfile, avatar_bytes: bytes | None = None
+    ) -> None:
+        self.identity.setText("@" + profile.username)
+        self.display_name.setText(profile.display_name)
+        self.bio.setPlainText(profile.bio)
+        self.share_servers.setChecked(profile.share_servers)
+        if avatar_bytes:
+            pixmap = QPixmap()
+            if pixmap.loadFromData(avatar_bytes, "JPEG"):
+                self.avatar_preview.setPixmap(
+                    pixmap.scaled(72, 72, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                )
+        else:
+            self.avatar_preview.setPixmap(QPixmap())
+            self.avatar_preview.setText("MM")
+        self.status.setText(
+            "Аватар установлен." if profile.avatar_path else "Аватар не установлен."
+        )
+
+    def _choose_avatar(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Выбрать аватар", "", "Изображения (*.png *.jpg *.jpeg *.webp)"
+        )
+        if not filename:
+            return
+        image = QImage(filename)
+        if image.isNull():
+            self.status.setText("Не удалось открыть выбранное изображение.")
+            return
+        side = min(image.width(), image.height())
+        image = image.copy((image.width() - side) // 2, (image.height() - side) // 2, side, side)
+        image = image.scaled(512, 512, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        buffer = QBuffer()
+        buffer.open(QIODevice.WriteOnly)
+        if not image.save(buffer, "JPEG", 86):
+            buffer.close()
+            self.status.setText("Не удалось преобразовать изображение в JPEG.")
+            return
+        data = bytes(buffer.data())
+        buffer.close()
+        if len(data) > 2 * 1024 * 1024:
+            self.status.setText("После сжатия аватар превышает 2 МБ.")
+            return
+        self.avatar_bytes = data
+        self.avatar_preview.setPixmap(
+            QPixmap.fromImage(image).scaled(72, 72, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        )
+        self.status.setText("Аватар готов к загрузке.")
+
+
+class CommunityDialog(QDialog):
+    lookupRequested = Signal(int, str)
+    followRequested = Signal(str, bool)
+    serversRequested = Signal(object)
+    addServerRequested = Signal(object)
+    avatarLoaded = Signal(object, object)
+
+    def __init__(self, followed_only: bool = False, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Сообщество MC Monitor")
+        self.setModal(True)
+        self.setMinimumSize(500, 450)
+        self._closed = False
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 16)
+        layout.setSpacing(10)
+        self.avatarLoaded.connect(self._set_avatar)
+
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Ник, имя или адрес сервера (от 2 символов)")
+        self.search.textChanged.connect(self._search_changed)
+        layout.addWidget(self.search)
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(QWidget(), "Игроки")
+        self.tabs.addTab(QWidget(), "Серверы")
+        self.tabs.addTab(QWidget(), "Подписки")
+        self.tabs.currentChanged.connect(self._tab_changed)
+        layout.addWidget(self.tabs)
+
+        self.results = QWidget()
+        self.results_layout = QVBoxLayout(self.results)
+        self.results_layout.setContentsMargins(2, 2, 2, 2)
+        self.results_layout.setSpacing(8)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setWidget(self.results)
+        layout.addWidget(self.scroll, 1)
+
+        close = _button("Закрыть", "quietButton")
+        close.clicked.connect(self.reject)
+        layout.addWidget(close)
+        self.query = ""
+        if followed_only:
+            self.tabs.setCurrentIndex(2)
+        else:
+            self.set_status("Введи не менее двух символов для поиска.")
+
+    @property
+    def mode(self) -> int:
+        return self.tabs.currentIndex()
+
+    def _search_changed(self, query: str) -> None:
+        self.query = query.strip()
+        if self.mode != 2:
+            self.lookupRequested.emit(self.mode, self.query)
+
+    def _tab_changed(self, mode: int) -> None:
+        self.search.setVisible(mode != 2)
+        if mode == 2:
+            self.lookupRequested.emit(mode, "")
+        elif self.search.text().strip():
+            self.lookupRequested.emit(mode, self.search.text().strip())
+        else:
+            self.set_status("Введи не менее двух символов для поиска.")
+
+    def set_status(self, text: str) -> None:
+        self._clear()
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setStyleSheet("color: #9db1a7; padding: 8px;")
+        self.results_layout.addWidget(label)
+        self.results_layout.addStretch(1)
+
+    def set_profiles(
+        self, profiles: list[cloud_sync.PublicProfile], followed: bool = False
+    ) -> None:
+        self._clear()
+        if not profiles:
+            self.set_status("Ты пока ни на кого не подписан." if followed else "Ничего не найдено.")
+            return
+        for profile in profiles:
+            row = QFrame()
+            row.setObjectName("serverCard")
+            row_layout = QVBoxLayout(row)
+            row_layout.setContentsMargins(12, 10, 12, 10)
+            identity = QHBoxLayout()
+            avatar = QLabel(profile.username[:1].upper())
+            avatar.setFixedSize(38, 38)
+            avatar.setAlignment(Qt.AlignCenter)
+            avatar.setStyleSheet(
+                "background: rgba(126,224,163,32); border: 1px solid rgba(126,224,163,90); "
+                "border-radius: 19px; font-size: 15px; font-weight: 900;"
+            )
+            avatar.setProperty("profileId", profile.user_id)
+            identity.addWidget(avatar)
+            title = QLabel(
+                profile.display_name + "  @" + profile.username
+                if profile.display_name
+                else "@" + profile.username
+            )
+            title.setStyleSheet("font-size: 14px; font-weight: 800;")
+            identity.addWidget(title, 1)
+            row_layout.addLayout(identity)
+            if profile.avatar_path:
+                threading.Thread(
+                    target=self._download_avatar,
+                    args=(avatar, profile),
+                    daemon=True,
+                ).start()
+            if profile.bio:
+                description = QLabel(profile.bio)
+                description.setWordWrap(True)
+                description.setStyleSheet("color: #9db1a7;")
+                row_layout.addWidget(description)
+            actions = QHBoxLayout()
+            follow = _button(
+                "Отписаться" if profile.is_following else "Подписаться", "quietButton"
+            )
+            follow.clicked.connect(
+                lambda _checked=False, p=profile: self.followRequested.emit(
+                    p.user_id, p.is_following
+                )
+            )
+            actions.addWidget(follow)
+            if profile.share_servers:
+                servers = _button("Серверы", "quietButton")
+                servers.clicked.connect(
+                    lambda _checked=False, p=profile: self.serversRequested.emit(p)
+                )
+                actions.addWidget(servers)
+            actions.addStretch(1)
+            row_layout.addLayout(actions)
+            self.results_layout.addWidget(row)
+        self.results_layout.addStretch(1)
+
+    def _download_avatar(
+        self, label: QLabel, profile: cloud_sync.PublicProfile
+    ) -> None:
+        try:
+            data = cloud_sync.download_avatar(profile)
+            if data:
+                image = QImage.fromData(data, "JPEG")
+                if image.isNull():
+                    raise cloud_sync.CloudError("Файл аватара повреждён.")
+                if not self._closed:
+                    try:
+                        self.avatarLoaded.emit(label, image)
+                    except RuntimeError:
+                        log.debug("Окно сообщества уже закрыто")
+        except cloud_sync.CloudError as exc:
+            log.warning("Не удалось загрузить аватар @%s: %s", profile.username, exc)
+
+    def _set_avatar(self, label: QLabel, image: QImage) -> None:
+        try:
+            label.setPixmap(
+                QPixmap.fromImage(image).scaled(
+                    38, 38, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+            )
+            label.setText("")
+        except RuntimeError:
+            log.debug("Результат загрузки аватара устарел")
+
+    def closeEvent(self, event) -> None:  # noqa: ANN001
+        self._closed = True
+        super().closeEvent(event)
+
+    def set_servers(self, servers: list[cloud_sync.PublicServer]) -> None:
+        self._clear()
+        if not servers:
+            self.set_status("Публичных серверов не найдено.")
+            return
+        for server in servers:
+            row = QFrame()
+            row.setObjectName("serverCard")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(12, 9, 12, 9)
+            details = QLabel(
+                f"{server.name}\n{server.address} · {server.protocol.upper()} · @{server.username}"
+            )
+            details.setWordWrap(True)
+            row_layout.addWidget(details, 1)
+            add = _button("Добавить", "quietButton")
+            add.clicked.connect(
+                lambda _checked=False, item=server: self.addServerRequested.emit(item)
+            )
+            row_layout.addWidget(add)
+            self.results_layout.addWidget(row)
+        self.results_layout.addStretch(1)
+
+    def _clear(self) -> None:
+        while self.results_layout.count():
+            item = self.results_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+
 class ServerCard(QFrame):
     widgetRequested = Signal(str)
     removeRequested = Signal(str)
@@ -570,6 +894,9 @@ class MainWindow(QMainWindow):
         self.controller = app_controller
         self._cards: dict[str, ServerCard] = {}
         self._settings_dialog: SettingsDialog | None = None
+        self._profile_dialog: ProfileDialog | None = None
+        self._community_dialog: CommunityDialog | None = None
+        self._community_request_id = 0
         self.setWindowTitle("MC Monitor")
         self.setWindowIcon(QIcon(str(resource_path("assets/icon.ico"))))
         self.setMinimumSize(390, 500)
@@ -732,6 +1059,8 @@ class MainWindow(QMainWindow):
 
         self._cloud_bridge = _CloudBridge(self)
         self._cloud_bridge.completed.connect(self._cloud_completed)
+        self._social_bridge = _CloudBridge(self)
+        self._social_bridge.completed.connect(self._social_completed)
         self._cloud_busy = False
         self._cloud_pending = False
         self._sync_timer = QTimer(self)
@@ -761,11 +1090,246 @@ class MainWindow(QMainWindow):
             return
 
         menu = QMenu(self)
+        menu.addAction("Мой профиль", self._open_profile)
+        menu.addAction("Поиск игроков и серверов", self._open_community)
+        menu.addAction("Мои подписки", lambda: self._open_community(followed_only=True))
+        menu.addSeparator()
         menu.addAction("Синхронизировать сейчас", lambda: self._start_cloud_operation("sync"))
         menu.addAction("Выйти из аккаунта", self._logout)
         menu.exec(self.account_button.mapToGlobal(
             QPoint(0, self.account_button.height())
         ))
+
+    def _open_profile(self) -> None:
+        try:
+            session = cloud_sync.load_session(self.controller.config_path)
+        except cloud_sync.CloudError as exc:
+            QMessageBox.warning(self, "Сессия аккаунта", str(exc))
+            return
+        if session is None:
+            return
+        if self._profile_dialog is not None:
+            self._profile_dialog.show()
+            self._profile_dialog.raise_()
+            return
+        dialog = ProfileDialog(session.username, self)
+        self._profile_dialog = dialog
+        dialog.saveRequested.connect(lambda current=dialog: self._save_profile(current))
+        dialog.finished.connect(lambda _result: self._clear_profile_dialog(dialog))
+        dialog.show()
+        self._run_social("profile_load", dialog=dialog)
+
+    def _clear_profile_dialog(self, dialog: ProfileDialog) -> None:
+        if self._profile_dialog is dialog:
+            self._profile_dialog = None
+        dialog.deleteLater()
+
+    def _save_profile(self, dialog: ProfileDialog) -> None:
+        self._run_social(
+            "profile_save",
+            dialog=dialog,
+            display_name=dialog.display_name.text(),
+            bio=dialog.bio.toPlainText(),
+            share_servers=dialog.share_servers.isChecked(),
+            avatar=dialog.avatar_bytes,
+        )
+        dialog.status.setText("Сохраняю профиль…")
+
+    def _open_community(self, followed_only: bool = False) -> None:
+        try:
+            if cloud_sync.load_session(self.controller.config_path) is None:
+                QMessageBox.information(self, "Сообщество", "Сначала войди в аккаунт.")
+                return
+        except cloud_sync.CloudError as exc:
+            QMessageBox.warning(self, "Сессия аккаунта", str(exc))
+            return
+        if self._community_dialog is not None:
+            self._community_dialog.show()
+            self._community_dialog.raise_()
+            if followed_only:
+                self._community_dialog.tabs.setCurrentIndex(2)
+            return
+        dialog = CommunityDialog(followed_only, self)
+        self._community_dialog = dialog
+        dialog.followRequested.connect(self._community_follow)
+        dialog.serversRequested.connect(self._community_profile_servers)
+        dialog.addServerRequested.connect(self._add_public_server)
+        dialog.finished.connect(lambda _result: self._clear_community_dialog(dialog))
+        dialog.lookupRequested.connect(self._schedule_community_lookup)
+        dialog.show()
+        self._community_lookup(dialog.mode, dialog.search.text().strip())
+
+    def _clear_community_dialog(self, dialog: CommunityDialog) -> None:
+        if self._community_dialog is dialog:
+            self._community_dialog = None
+        dialog.deleteLater()
+
+    def _schedule_community_lookup(self, mode: int, query: str) -> None:
+        if self._community_dialog is None:
+            return
+        self._community_request_id += 1
+        request_id = self._community_request_id
+        if mode == 2:
+            self._run_social(
+                "community_followed",
+                dialog=self._community_dialog,
+                request_id=request_id,
+            )
+            return
+        if len(query) < 2:
+            self._community_dialog.set_status("Введи не менее двух символов для поиска.")
+            return
+        QTimer.singleShot(
+            300,
+            lambda: self._community_lookup(mode, query, request_id),
+        )
+
+    def _community_lookup(
+        self, mode: int, query: str, request_id: int | None = None
+    ) -> None:
+        dialog = self._community_dialog
+        if dialog is None:
+            return
+        if request_id is None:
+            self._community_request_id += 1
+            request_id = self._community_request_id
+        if request_id != self._community_request_id:
+            return
+        if mode == 2:
+            self._run_social(
+                "community_followed", dialog=dialog, request_id=request_id
+            )
+        elif len(query) >= 2:
+            action = "community_profiles" if mode == 0 else "community_servers"
+            self._run_social(
+                action, dialog=dialog, query=query, request_id=request_id
+            )
+        else:
+            dialog.set_status("Введи не менее двух символов для поиска.")
+
+    def _community_follow(self, user_id: str, is_following: bool) -> None:
+        self._run_social(
+            "community_unfollow" if is_following else "community_follow",
+            dialog=self._community_dialog,
+            user_id=user_id,
+        )
+
+    def _community_profile_servers(self, profile: cloud_sync.PublicProfile) -> None:
+        self._run_social(
+            "community_user_servers",
+            dialog=self._community_dialog,
+            profile=profile,
+            request_id=self._community_request_id,
+        )
+
+    def _add_public_server(self, server: cloud_sync.PublicServer) -> None:
+        try:
+            config = ServerConfig.from_address(
+                server.address, server.name, protocol=server.protocol
+            )
+        except ConfigError as exc:
+            QMessageBox.warning(self, "Адрес сервера", str(exc))
+            return
+        if any(item.address.lower() == config.address.lower()
+               for item in self.controller.config.servers):
+            QMessageBox.information(self, "Сервер уже добавлен", config.address)
+            return
+        self._save_config([*self.controller.config.servers, config])
+
+    def _run_social(self, action: str, dialog=None, **payload) -> None:  # noqa: ANN001
+        config_path = self.controller.config_path
+
+        def worker() -> None:
+            try:
+                session = cloud_sync.load_session(config_path)
+                if session is None:
+                    raise cloud_sync.CloudError("Сначала войди в аккаунт.")
+                if action == "profile_load":
+                    profile = cloud_sync.fetch_profile(session)
+                    result = (profile, cloud_sync.download_avatar(profile))
+                elif action == "profile_save":
+                    profile = cloud_sync.update_profile(
+                        session,
+                        payload["display_name"],
+                        payload["bio"],
+                        payload["share_servers"],
+                    )
+                    if payload.get("avatar") is not None:
+                        profile = cloud_sync.upload_avatar(session, payload["avatar"])
+                        avatar_data = payload["avatar"]
+                    else:
+                        avatar_data = cloud_sync.download_avatar(profile)
+                    result = (profile, avatar_data)
+                elif action == "community_profiles":
+                    result = cloud_sync.search_profiles(session, payload["query"])
+                elif action == "community_servers":
+                    result = cloud_sync.search_public_servers(session, payload["query"])
+                elif action == "community_followed":
+                    result = cloud_sync.list_followed_profiles(session)
+                elif action == "community_user_servers":
+                    profile = payload["profile"]
+                    result = cloud_sync.list_public_servers(session, profile.user_id)
+                elif action in {"community_follow", "community_unfollow"}:
+                    mutate = (
+                        cloud_sync.follow_profile
+                        if action == "community_follow"
+                        else cloud_sync.unfollow_profile
+                    )
+                    mutate(session, payload["user_id"])
+                    result = None
+                else:
+                    raise cloud_sync.CloudError("Неизвестная операция сообщества.")
+                cloud_sync.save_session(config_path, session)
+                self._social_bridge.completed.emit({
+                    "action": action,
+                    "dialog": dialog,
+                    "payload": payload,
+                    "result": result,
+                    "error": None,
+                })
+            except (cloud_sync.CloudError, OSError, ValueError) as exc:
+                self._social_bridge.completed.emit({
+                    "action": action,
+                    "dialog": dialog,
+                    "payload": payload,
+                    "result": None,
+                    "error": str(exc),
+                })
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _social_completed(self, response: dict) -> None:
+        action = response["action"]
+        dialog = response.get("dialog")
+        error = response.get("error")
+        if action.startswith("profile_") and dialog is self._profile_dialog:
+            if error:
+                dialog.status.setText(error)
+            elif action == "profile_load":
+                profile, avatar = response["result"]
+                dialog.set_profile(profile, avatar)
+            elif action == "profile_save":
+                profile, avatar = response["result"]
+                dialog.set_profile(profile, avatar)
+                dialog.accept()
+                QMessageBox.information(self, "Профиль", "Изменения сохранены.")
+            return
+        if dialog is not self._community_dialog:
+            return
+        request_id = response.get("payload", {}).get("request_id")
+        if request_id is not None and request_id != self._community_request_id:
+            return
+        if error:
+            dialog.set_status(error)
+            return
+        if action in {"community_profiles", "community_followed"}:
+            dialog.set_profiles(
+                response["result"], followed=action == "community_followed"
+            )
+        elif action in {"community_servers", "community_user_servers"}:
+            dialog.set_servers(response["result"])
+        elif action in {"community_follow", "community_unfollow"}:
+            self._community_lookup(dialog.mode, dialog.search.text().strip())
 
     def _open_settings(self) -> None:
         if self._settings_dialog is None:

@@ -393,6 +393,114 @@ def test_cloud_protocol_contract() -> None:
     assert merged[0].protocol == "bedrock"
 
 
+def test_public_profile_validation_and_avatar_url() -> None:
+    user_id = "123e4567-e89b-12d3-a456-426614174000"
+    profile = cloud_sync._profile_from_row(
+        {
+            "id": user_id,
+            "username": "BlockBuilder",
+            "display_name": "Builder",
+            "bio": "Hello",
+            "avatar_path": user_id + "/avatar.jpg",
+            "share_servers": False,
+            "is_following": True,
+        }
+    )
+    assert profile.is_following and not profile.share_servers
+    assert profile.avatar_url.endswith("/avatars/" + user_id + "/avatar.jpg")
+    try:
+        cloud_sync._profile_from_row(
+            {
+                "id": user_id,
+                "username": "BlockBuilder",
+                "avatar_path": "../other/avatar.jpg",
+            }
+        )
+    except cloud_sync.CloudError:
+        pass
+    else:
+        raise AssertionError("an untrusted avatar path must be rejected")
+
+
+def test_public_profile_requests_are_scoped_and_opt_in() -> None:
+    user_id = "123e4567-e89b-12d3-a456-426614174000"
+    session = cloud_sync.AccountSession("access", "refresh", user_id, "Current")
+    calls: list[tuple[str, str, dict | bytes | None, dict]] = []
+    original_request = cloud_sync._request_with_session
+
+    def capture_request(path, method, body, request_session, prefer=None, **kwargs):
+        calls.append((path, method, body, {"prefer": prefer, **kwargs}))
+        if path.endswith("search_public_profiles"):
+            return '[{"id":"' + user_id + '","username":"BlockBuilder","is_following":false}]'
+        if path.startswith("/rest/v1/profiles?id="):
+            return (
+                '[{"id":"' + user_id + '","username":"Current",'
+                '"display_name":"Builder","bio":"Hi","share_servers":false}]'
+            )
+        return "[]"
+
+    cloud_sync._request_with_session = capture_request
+    try:
+        profile = cloud_sync.update_profile(session, " Builder ", " Hi ", False)
+        matches = cloud_sync.search_profiles(session, "  block ")
+    finally:
+        cloud_sync._request_with_session = original_request
+
+    assert profile.display_name == "Builder" and not profile.share_servers
+    assert calls[0][0] == f"/rest/v1/profiles?id=eq.{user_id}"
+    assert calls[0][2] == {
+        "display_name": "Builder",
+        "bio": "Hi",
+        "share_servers": False,
+    }
+    assert calls[1][2] == {"search_term": "block", "result_limit": 20}
+    assert matches[0].username == "BlockBuilder"
+
+
+def test_public_profile_mutations_reject_self_follow_and_invalid_images() -> None:
+    user_id = "123e4567-e89b-12d3-a456-426614174000"
+    session = cloud_sync.AccountSession("access", "refresh", user_id, "Current")
+    for action in (
+        lambda: cloud_sync.follow_profile(session, user_id),
+        lambda: cloud_sync.upload_avatar(session, b"not a jpeg"),
+        lambda: cloud_sync.search_profiles(session, "x"),
+    ):
+        try:
+            action()
+        except cloud_sync.CloudError:
+            pass
+        else:
+            raise AssertionError("invalid social input must be rejected")
+
+
+def test_public_avatar_upload_is_owner_scoped_jpeg() -> None:
+    user_id = "123e4567-e89b-12d3-a456-426614174000"
+    session = cloud_sync.AccountSession("access", "refresh", user_id, "Current")
+    calls: list[tuple[str, str, dict | bytes | None, dict]] = []
+    original_request = cloud_sync._request_with_session
+
+    def capture_request(path, method, body, request_session, prefer=None, **kwargs):
+        calls.append((path, method, body, {"prefer": prefer, **kwargs}))
+        if path.startswith("/rest/v1/profiles?select="):
+            return (
+                '[{"id":"' + user_id + '","username":"Current",'
+                '"avatar_path":"' + user_id + '/avatar.jpg"}]'
+            )
+        return ""
+
+    cloud_sync._request_with_session = capture_request
+    try:
+        profile = cloud_sync.upload_avatar(session, b"\xff\xd8\xffjpeg-data")
+    finally:
+        cloud_sync._request_with_session = original_request
+
+    assert profile.avatar_path == user_id + "/avatar.jpg"
+    assert calls[0][0] == f"/storage/v1/object/avatars/{user_id}/avatar.jpg"
+    assert calls[0][2] == b"\xff\xd8\xffjpeg-data"
+    assert calls[0][3]["content_type"] == "image/jpeg"
+    assert calls[0][3]["headers"] == {"x-upsert": "true"}
+
+
 def test_cloud_sync_state_roundtrip() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "servers.json"
@@ -511,6 +619,10 @@ def main() -> None:
         test_cloud_account_identifiers,
         test_cloud_server_merge,
         test_cloud_protocol_contract,
+        test_public_profile_validation_and_avatar_url,
+        test_public_profile_requests_are_scoped_and_opt_in,
+        test_public_profile_mutations_reject_self_follow_and_invalid_images,
+        test_public_avatar_upload_is_owner_scoped_jpeg,
         test_cloud_sync_state_roundtrip,
         test_cloud_session_protection,
         test_notify_join_by_name,
