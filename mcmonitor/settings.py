@@ -1,0 +1,270 @@
+"""Настройки внешнего вида, цветов виджетов и горячих клавиш (только ПК)."""
+from __future__ import annotations
+
+from dataclasses import replace
+from typing import Any
+
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPaintEvent
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QColorDialog,
+    QDialog,
+    QDialogButtonBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QKeySequenceEdit,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
+
+from .config import AppConfig, save_config
+
+
+class ColorChip(QFrame):
+    """Квадратик цвета с мягкой обводкой — выбранный акцент."""
+
+    clicked = Signal(QColor)
+
+    def __init__(self, color: QColor, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._color = color
+        self._selected = False
+        self.setFixedSize(34, 34)
+        self.setCursor(Qt.PointingHandCursor)
+        self._polish()
+
+    def _polish(self) -> None:
+        c = self._color
+        selected = "3px solid #ffffff" if self._selected else "1px solid rgba(255,255,255,60)"
+        self.setStyleSheet(
+            f"ColorChip {{ background: {c.name()}; border-radius: 8px; border: {selected}; }}"
+        )
+
+    def setSelected(self, selected: bool) -> None:
+        self._selected = selected
+        self._polish()
+
+    def color(self) -> QColor:
+        return self._color
+
+    def mousePressEvent(self, event) -> None:  # noqa: ANN001
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit(self._color)
+
+
+class GradientPreview(QWidget):
+    """Анимированный градиент на основе выбранного акцентного цвета."""
+
+    def __init__(self, accent: QColor, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._accent = accent
+        self._offset = 0.0
+        self.setFixedHeight(120)
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(30)
+
+    def setAccent(self, color: QColor) -> None:
+        self._accent = color
+        self.update()
+
+    def _tick(self) -> None:
+        self._offset = (self._offset + 0.5) % 360
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: ANN001
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        rect = self.rect()
+        c = self._accent
+        lighter = c.lighter(140)
+        darker = c.darker(130)
+        grad = QLinearGradient(rect.topLeft(), rect.bottomRight())
+        grad.setColorAt(0.0, darker)
+        grad.setColorAt(0.5, c)
+        grad.setColorAt(1.0, lighter)
+        painter.setBrush(grad)
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(rect, 16, 16)
+        glow = QLinearGradient(rect.center(), rect.bottomRight())
+        glow.setColorAt(0.0, QColor(255, 255, 255, 18))
+        glow.setColorAt(1.0, QColor(255, 255, 255, 0))
+        painter.setBrush(glow)
+        painter.drawEllipse(rect.center(), rect.width() // 3, rect.height() // 3)
+
+
+class SettingsDialog(QDialog):
+    """Окно настроек: внешний вид, цвета виджетов, горячие клавиши."""
+
+    settingsChanged = Signal(AppConfig)
+
+    def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Настройки MC Monitor")
+        self.setMinimumWidth(520)
+        self.setMinimumHeight(620)
+        self._config = config
+        self._working = replace(config)
+
+        self._build_ui()
+        self._load_from_config()
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(16)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+
+        content = QWidget()
+        cl = QVBoxLayout(content)
+        cl.setSpacing(20)
+
+        cl.addWidget(self._section("Внешний вид"))
+
+        self.accentLabel = QLabel("Основной цвет (акцент)")
+        self.accentLabel.setStyleSheet("font-weight: 700; font-size: 13px;")
+        cl.addWidget(self.accentLabel)
+
+        self.gradientPreview = GradientPreview(QColor(self._working.accent_color))
+        cl.addWidget(self.gradientPreview)
+
+        chipRow = QHBoxLayout()
+        chipRow.setSpacing(10)
+        palette = [
+            "#7ee0a3", "#9ec8ff", "#d3b4ff", "#ffb3c7", "#ffd79a",
+            "#9ff0e0", "#ff8391", "#ffc978", "#a7c6a4", "#7fb3d9",
+        ]
+        self.accentChips: list = []
+        for hexColor in palette:
+            chip = ColorChip(QColor(hexColor))
+            chip.clicked.connect(self._pickAccent)
+            self.accentChips.append(chip)
+            chipRow.addWidget(chip)
+        chipRow.addStretch()
+        cl.addLayout(chipRow)
+
+        customBtn = QPushButton("Выбрать свой цвет…")
+        customBtn.setCursor(Qt.PointingHandCursor)
+        customBtn.clicked.connect(self._pickCustomColor)
+        cl.addWidget(customBtn)
+
+        cl.addWidget(self._section("Цвета виджетов"))
+
+        self.widgetBgBtn = self._colorButton("Фон виджета", self._working.widget_bg_color)
+        cl.addWidget(self.widgetBgBtn)
+        self.widgetAccentBtn = self._colorButton("Акцент виджета", self._working.widget_accent_color)
+        cl.addWidget(self.widgetAccentBtn)
+
+        opacityRow = QHBoxLayout()
+        opacityLabel = QLabel("Прозрачность фона виджета")
+        self.opacityValue = QLabel(f"{int(self._working.widget_opacity * 100)}%")
+        self.opacityValue.setStyleSheet("color: #8ca99d;")
+        from PySide6.QtWidgets import QSlider
+        self.opacitySlider = QSlider(Qt.Horizontal)
+        self.opacitySlider.setRange(40, 100)
+        self.opacitySlider.setValue(int(self._working.widget_opacity * 100))
+        self.opacitySlider.valueChanged.connect(
+            lambda v: self.opacityValue.setText(f"{v}%")
+        )
+        opacityRow.addWidget(opacityLabel)
+        opacityRow.addWidget(self.opacitySlider)
+        opacityRow.addWidget(self.opacityValue)
+        cl.addLayout(opacityRow)
+
+        cl.addWidget(self._section("Горячие клавиши (ПК)"))
+
+        hkLabel = QLabel("Показать / скрыть плавающий виджет")
+        hkLabel.setStyleSheet("font-weight: 700; font-size: 13px;")
+        cl.addWidget(hkLabel)
+        hkNote = QLabel("Нажмите клавиши в поле ниже, чтобы переназначить.")
+        hkNote.setStyleSheet("color: #8ca99d; font-size: 11px;")
+        cl.addWidget(hkNote)
+
+        self.hotkeyEdit = QKeySequenceEdit()
+        from PySide6.QtGui import QKeySequence
+        self.hotkeyEdit.setKeySequence(QKeySequence(self._working.hotkey_show_widget))
+        self.hotkeyEdit.setMinimumWidth(200)
+        cl.addWidget(self.hotkeyEdit)
+
+        cl.addStretch()
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Save | QDialogButtonBox.Cancel
+        )
+        buttons.button(QDialogButtonBox.Save).setText("Сохранить")
+        buttons.button(QDialogButtonBox.Cancel).setText("Отмена")
+        buttons.button(QDialogButtonBox.Save).setDefault(True)
+        buttons.button(QDialogButtonBox.Save).setObjectName("primaryButton")
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _section(self, title: str) -> QLabel:
+        label = QLabel(title)
+        label.setStyleSheet(
+            "color: #8ca99d; font-size: 9px; font-weight: 900; letter-spacing: 1.3px; margin-top: 4px;"
+        )
+        return label
+
+    def _colorButton(self, label: str, currentHex: str) -> QPushButton:
+        btn = QPushButton(label)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setProperty("currentColor", currentHex)
+        btn.setStyleSheet(
+            f"QPushButton {{ background: {currentHex}; color: #10231a; border: none; border-radius: 10px; padding: 10px; font-weight: 800; text-align: left; }} "
+            f"QPushButton:hover {{ opacity: 0.9; }}"
+        )
+        btn.clicked.connect(lambda: self._pickWidgetColor(btn))
+        return btn
+
+    def _load_from_config(self) -> None:
+        accent = QColor(self._working.accent_color)
+        self.gradientPreview.setAccent(accent)
+        for chip in self.accentChips:
+            chip.setSelected(chip.color().name() == self._working.accent_color)
+
+    def _pickAccent(self, color: QColor) -> None:
+        self._working = replace(self._working, accent_color=color.name())
+        self.gradientPreview.setAccent(color)
+        for chip in self.accentChips:
+            chip.setSelected(chip.color().name() == color.name())
+
+    def _pickCustomColor(self) -> None:
+        current = QColor(self._working.accent_color)
+        color = QColorDialog.getColor(current, self, "Выберите основной цвет")
+        if color.isValid():
+            self._pickAccent(color)
+
+    def _pickWidgetColor(self, btn: QPushButton) -> None:
+        current = QColor(btn.property("currentColor"))
+        color = QColorDialog.getColor(current, self, "Выберите цвет")
+        if color.isValid():
+            btn.setProperty("currentColor", color.name())
+            hexName = color.name()
+            if btn == self.widgetBgBtn:
+                self._working = replace(self._working, widget_bg_color=hexName)
+            elif btn == self.widgetAccentBtn:
+                self._working = replace(self._working, widget_accent_color=hexName)
+            btn.setStyleSheet(
+                f"QPushButton {{ background: {hexName}; color: #10231a; border: none; border-radius: 10px; padding: 10px; font-weight: 800; text-align: left; }} "
+                f"QPushButton:hover {{ opacity: 0.9; }}"
+            )
+
+    def _save(self) -> None:
+        hk = self.hotkeyEdit.keySequence().toString()
+        self._working = replace(
+            self._working,
+            hotkey_show_widget=hk,
+        )
+        self.settingsChanged.emit(self._working)
+        self.accept()

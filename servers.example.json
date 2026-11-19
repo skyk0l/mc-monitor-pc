@@ -1,0 +1,10 @@
+{
+  "poll_interval": 60,
+  "notify_joins": true,
+  "notify_offline": true,
+  "notify_online": true,
+  "servers": [
+    {"name": "Hypixel", "address": "mc.hypixel.net"},
+    {"name": "Мой сервер", "address": "localhost:25565"}
+  ]
+}
