@@ -206,8 +206,11 @@ class StatusWidget(QWidget):
         self.update()
 
     # --- геометрия -------------------------------------------------------
+    def _widget_servers(self) -> list[ServerConfig]:
+        return [server for server in self.app.config.servers if server.show_in_widget]
+
     def _row_count(self) -> int:
-        return max(1, len(self.app.config.servers))
+        return max(1, len(self._widget_servers()))
 
     def _base_card_height(self) -> float:
         return HEADER_HEIGHT + ROW_HEIGHT * self._row_count() + FOOTER_HEIGHT + 4
@@ -223,7 +226,7 @@ class StatusWidget(QWidget):
         card = self._card_rect()
         top = card.top() + HEADER_HEIGHT
         rows: list[tuple[ServerConfig, QRectF]] = []
-        for server in self.app.config.servers:
+        for server in self._widget_servers():
             rows.append(
                 (server, QRectF(card.left() + 8, top, card.width() - 16, ROW_HEIGHT))
             )
@@ -449,10 +452,19 @@ class StatusWidget(QWidget):
     def _paint_card(self, painter: QPainter, card: QRectF) -> None:
         path = QPainterPath()
         path.addRoundedRect(card, RADIUS, RADIUS)
+        base_color = QColor(self.app.config.widget_bg_color)
+        if not base_color.isValid():
+            base_color = QColor("#252B30")
+        opacity = max(0.35, min(1.0, self.app.config.widget_opacity))
+        top_color = base_color.lighter(118)
+        middle_color = QColor(base_color)
+        bottom_color = base_color.darker(112)
+        for color in (top_color, middle_color, bottom_color):
+            color.setAlpha(round(255 * opacity))
         gradient = QLinearGradient(card.topLeft(), card.bottomLeft())
-        gradient.setColorAt(0.0, QColor(31, 34, 45, 247))
-        gradient.setColorAt(0.55, QColor(24, 27, 36, 249))
-        gradient.setColorAt(1.0, QColor(18, 20, 28, 250))
+        gradient.setColorAt(0.0, top_color)
+        gradient.setColorAt(0.55, middle_color)
+        gradient.setColorAt(1.0, bottom_color)
         painter.fillPath(path, gradient)
 
         sheen = QRadialGradient(QPointF(card.center().x(), card.top()), card.width() * 0.8)
@@ -466,7 +478,11 @@ class StatusWidget(QWidget):
         border = QPainterPath()
         border.addRoundedRect(card.adjusted(0.5, 0.5, -0.5, -0.5), RADIUS, RADIUS)
         painter.setBrush(Qt.NoBrush)
-        painter.setPen(QPen(QColor(255, 255, 255, int(16 + 26 * self._hover)), 1))
+        border_color = QColor(self.app.config.widget_accent_color)
+        if not border_color.isValid():
+            border_color = QColor("#A7C6A4")
+        border_color.setAlpha(int(18 + 24 * self._hover))
+        painter.setPen(QPen(border_color, 1))
         painter.drawPath(border)
 
     def _paint_header(self, painter: QPainter, card: QRectF) -> None:
@@ -477,6 +493,27 @@ class StatusWidget(QWidget):
             painter.drawPixmap(
                 QPointF(card.left() + 17, card.top() + (HEADER_HEIGHT - logo.height()) / 2),
                 logo,
+            )
+
+        selected = self._widget_servers()
+        group_names = {server.group_id for server in selected if server.group_id}
+        if selected:
+            title = next(iter(group_names)) if len(group_names) == 1 else "ИЗБРАННОЕ"
+            title_font = _font(8, QFont.Weight.DemiBold, 0.8)
+            painter.setFont(title_font)
+            painter.setPen(QColor(160, 174, 191, 220))
+            title_rect = QRectF(
+                card.left() + 142,
+                card.top() + 10,
+                max(0, card.width() - 142 - 2 * BUTTON_SIZE - 40),
+                HEADER_HEIGHT - 20,
+            )
+            painter.drawText(
+                title_rect,
+                Qt.AlignLeft | Qt.AlignVCenter,
+                QFontMetricsF(title_font).elidedText(
+                    title, Qt.ElideRight, max(0, int(title_rect.width()))
+                ),
             )
 
         self._close_rect = QRectF(
@@ -501,7 +538,11 @@ class StatusWidget(QWidget):
                     painter.drawEllipse(rect.adjusted(1, 1, -1, -1))
 
         glyph_alpha = int(235 * min(1.0, buttons_alpha + 0.15))
-        painter.setPen(QColor(198, 206, 222, glyph_alpha))
+        glyph_color = QColor(self.app.config.widget_accent_color)
+        if not glyph_color.isValid():
+            glyph_color = QColor(198, 206, 222)
+        glyph_color.setAlpha(glyph_alpha)
+        painter.setPen(glyph_color)
         painter.save()
         painter.translate(self._refresh_rect.center())
         if self._loading:
@@ -510,21 +551,24 @@ class StatusWidget(QWidget):
         painter.drawText(QRectF(-12, -12, 24, 24), Qt.AlignCenter, "↻")
         painter.restore()
 
-        painter.setPen(QColor(198, 206, 222, glyph_alpha))
+        painter.setPen(glyph_color)
         painter.setFont(_font(10, QFont.Weight.DemiBold))
         painter.drawText(self._close_rect, Qt.AlignCenter, "✕")
 
     def _paint_rows(self, painter: QPainter, card: QRectF) -> None:
-        servers = self.app.config.servers
+        servers = self._widget_servers()
         top = card.top() + HEADER_HEIGHT
         if not servers:
             painter.setFont(_font(13, QFont.Weight.DemiBold))
             painter.setPen(SOFT)
-            painter.drawText(QPointF(card.left() + 34, top + 24), "Нет серверов")
+            message = "Нет серверов" if not self.app.config.servers else "Виджет пока пуст"
+            painter.drawText(QPointF(card.left() + 34, top + 24), message)
             painter.setFont(_font(10))
             painter.setPen(DIM)
             painter.drawText(
-                QPointF(card.left() + 34, top + 42), "Добавь сервер в окне приложения"
+                QPointF(card.left() + 34, top + 42),
+                "Добавь сервер в окне приложения" if not self.app.config.servers
+                else "Выбери «Показать в виджете» в меню сервера",
             )
             return
         self._player_area = QRectF()
@@ -543,7 +587,10 @@ class StatusWidget(QWidget):
         row_top = row.top()
         status = self.statuses.get(server.address)
         online = status.online if status else None
-        color = MINT if online else CORAL if online is False else AMBER
+        online_color = QColor(self.app.config.widget_accent_color)
+        if not online_color.isValid():
+            online_color = MINT
+        color = online_color if online else CORAL if online is False else AMBER
         dot = QPointF(card.left() + 20, row_top + 20)
 
         if online:
@@ -594,7 +641,7 @@ class StatusWidget(QWidget):
             painter.setFont(suffix_font)
             painter.setPen(QColor(126, 134, 151, 220))
             painter.drawText(QPointF(x + num_width, row_top + 27), suffix)
-            label, label_color = "онлайн", MINT
+            label, label_color = "онлайн", online_color
         elif status is None:
             painter.setFont(_font(20, QFont.Weight.DemiBold))
             painter.setPen(AMBER)
@@ -1114,6 +1161,13 @@ class WidgetApp:
         self._quitting = False
         self.main_window = MainWindow(self)
         self.tray = TrayController(self)
+        self.hotkey = None
+        self._startup_hotkey_error = ""
+        try:
+            self.set_hotkey(self.config.hotkey_show_widget)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._startup_hotkey_error = str(exc)
+            log.warning("Не удалось зарегистрировать горячую клавишу: %s", exc)
 
     # --- запуск ----------------------------------------------------------
     def run(self) -> int:
@@ -1122,6 +1176,8 @@ class WidgetApp:
         self.widget.show()
         self.widget.animate_in()
         self.main_window.show()
+        if self._startup_hotkey_error:
+            self.show_toast("Горячая клавиша недоступна: " + self._startup_hotkey_error)
         self.refresh()
         QTimer.singleShot(
             5000,
@@ -1136,10 +1192,7 @@ class WidgetApp:
             self._refresh_again = True
             return
         self._refresh_again = False
-        servers = [s for s in self.config.servers if s.show_in_widget]
-        if not servers:
-            # Если нет серверов для виджета — показать все (обратная совместимость)
-            servers = self.config.servers
+        servers = self.config.servers
         self.pending = len(servers)
         self.widget.mark_loading(bool(servers))
         self.main_window.refresh_statuses()
@@ -1159,10 +1212,19 @@ class WidgetApp:
     def _on_status(self, server: ServerConfig, status: ServerStatus) -> None:
         if any(current.address == server.address for current in self.config.servers):
             old = self.statuses.get(server.address)
-            notice = change_notice(server.name, old, status, self.config)
+            notice = change_notice(
+                server.name,
+                old,
+                status,
+                self.config,
+                server.priority_players,
+            )
             self.statuses[server.address] = status
-            if notice and self.widget.isVisible():
-                self.show_toast(notice.message)
+            if notice:
+                if self.widget.isVisible():
+                    self.show_toast(notice.message)
+                else:
+                    self.tray.show_message(notice.title, notice.message)
             self.widget.status_changed(server.address)
             self.main_window.refresh_statuses()
         self.pending = max(0, self.pending - 1)
@@ -1184,6 +1246,13 @@ class WidgetApp:
             self.show_toast(f"Ошибка в настройках: {exc}")
             return
         self.config = config
+        hotkey_error: Exception | None = None
+        try:
+            self.set_hotkey(config.hotkey_show_widget)
+            self._startup_hotkey_error = ""
+        except (OSError, RuntimeError, ValueError) as exc:
+            log.warning("Не удалось применить горячую клавишу: %s", exc)
+            hotkey_error = exc
         self.timer.setInterval(config.poll_interval * 1000)
         addresses = {server.address for server in config.servers}
         self.statuses = {
@@ -1204,7 +1273,10 @@ class WidgetApp:
         self.widget.resize_to_content()
         self.widget.update()
         self.main_window.refresh_servers()
-        self.show_toast("Настройки перечитаны ✅")
+        if hotkey_error is not None:
+            self.show_toast("Горячая клавиша не применена: " + str(hotkey_error))
+        else:
+            self.show_toast("Настройки перечитаны ✅")
         self.refresh()
 
     def show_widget(self, address: str | None = None) -> None:
@@ -1216,6 +1288,20 @@ class WidgetApp:
         if address and any(server.address == address for server in self.config.servers):
             if self.widget.expanded != address:
                 self.widget.toggle_players(address)
+
+    def toggle_widget(self) -> None:
+        if self.widget.isVisible():
+            self.hide_widget()
+        else:
+            self.show_widget()
+
+    def set_hotkey(self, sequence: str) -> None:
+        from .hotkeys import GlobalHotkey
+
+        if self.hotkey is None:
+            self.hotkey = GlobalHotkey(self.qapp, sequence, self.toggle_widget)
+        else:
+            self.hotkey.set_sequence(sequence)
 
     def hide_widget(self) -> None:
         self.widget.hide()
@@ -1256,6 +1342,11 @@ class WidgetApp:
         self.remember_state()
         self.timer.stop()
         self.pool.shutdown(wait=False, cancel_futures=True)
+        if self.hotkey is not None:
+            try:
+                self.hotkey.unregister()
+            except OSError:
+                log.exception("Не удалось освободить горячую клавишу")
         self.tray.hide()
         self.main_window.hide()
         if self.toast is not None:

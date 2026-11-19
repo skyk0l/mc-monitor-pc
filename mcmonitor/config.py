@@ -27,6 +27,7 @@ class ServerConfig:
     show_in_widget: bool = False
     group_id: str | None = None
     sort_order: int = 0
+    priority_players: tuple[str, ...] = ()
 
     @property
     def address(self) -> str:
@@ -52,11 +53,27 @@ class ServerConfig:
                     server = replace(server, port=int(port))
                 except (TypeError, ValueError) as exc:
                     raise ConfigError(f"неправильный port у «{name}»") from exc
+            raw_priorities = value.get("priority_players", [])
+            if not isinstance(raw_priorities, (list, tuple)):
+                raise ConfigError(f"неправильный priority_players у «{name}»")
+            priorities: list[str] = []
+            seen_priorities: set[str] = set()
+            for raw_priority in raw_priorities:
+                if not isinstance(raw_priority, str):
+                    raise ConfigError(f"неправильный ник в priority_players у «{name}»")
+                priority = raw_priority.strip()
+                if not priority or len(priority) > 32:
+                    raise ConfigError(f"неправильный ник в priority_players у «{name}»")
+                key = priority.casefold()
+                if key not in seen_priorities:
+                    priorities.append(priority)
+                    seen_priorities.add(key)
             server = replace(
                 server,
                 show_in_widget=bool(value.get("show_in_widget", False)),
                 group_id=str(value.get("group_id") or ""),
                 sort_order=int(value.get("sort_order") or 0),
+                priority_players=tuple(priorities),
             )
             if not server.group_id:
                 server = replace(server, group_id=None)
@@ -142,6 +159,7 @@ class AppConfig:
                     "show_in_widget": server.show_in_widget,
                     "group_id": server.group_id,
                     "sort_order": server.sort_order,
+                    "priority_players": list(server.priority_players),
                 }
                 for server in self.servers
             ],

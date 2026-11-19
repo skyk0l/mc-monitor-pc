@@ -20,6 +20,7 @@ from mcmonitor.config import (  # noqa: E402
     save_config,
 )
 from mcmonitor.icon import make_icon, save_ico  # noqa: E402
+from mcmonitor.hotkeys import parse_hotkey  # noqa: E402
 from mcmonitor.models import ServerStatus  # noqa: E402
 from mcmonitor.notify import change_notice, new_players  # noqa: E402
 from mcmonitor.ui_state import WindowState, load_state, save_state  # noqa: E402
@@ -41,6 +42,19 @@ MCSTATUS = {
     "players": {"online": 1, "max": 10, "list": [{"name_clean": "Notch"}]},
     "motd": {"clean": "Hi there"},
 }
+
+
+def test_global_hotkey_parsing() -> None:
+    modifiers, key = parse_hotkey("Ctrl+Shift+M")
+    assert modifiers == 0x0002 | 0x0004
+    assert key == ord("M")
+    assert parse_hotkey("Alt+F12") == (0x0001, 0x7B)
+    for invalid in ("M", "Ctrl+Unknown+M", "Ctrl+Shift+M+N"):
+        try:
+            parse_hotkey(invalid)
+        except ValueError:
+            continue
+        raise AssertionError(f"invalid hotkey accepted: {invalid}")
 
 
 def test_update_release_metadata() -> None:
@@ -214,8 +228,13 @@ def test_config_parse() -> None:
         "name": "Bedrock SMP",
         "address": "play.example.org:19132",
         "protocol": "BEDROCK",
+        "show_in_widget": True,
+        "group_id": "Friends",
+        "priority_players": ["Notch", " notch ", "Jeb_"],
     })
     assert bedrock.protocol == "bedrock"
+    assert bedrock.show_in_widget and bedrock.group_id == "Friends"
+    assert bedrock.priority_players == ("Notch", "Jeb_")
 
     for broken in ({}, {"name": "S"}, {"address": ""}, {
         "address": "play.example.org",
@@ -236,7 +255,14 @@ def test_config_roundtrip() -> None:
         assert path.exists() and config.servers == []
 
         config.servers.extend([
-            ServerConfig("SMP", "localhost", 25565),
+            ServerConfig(
+                "SMP",
+                "localhost",
+                25565,
+                show_in_widget=True,
+                group_id="Friends",
+                priority_players=("Notch",),
+            ),
             ServerConfig("Bedrock", "localhost", 19132, "bedrock"),
         ])
         config.poll_interval = 30
@@ -246,6 +272,9 @@ def test_config_roundtrip() -> None:
         assert again.poll_interval == 30
         assert again.servers[0].address == "localhost:25565"
         assert again.servers[0].protocol == "java"
+        assert again.servers[0].show_in_widget
+        assert again.servers[0].group_id == "Friends"
+        assert again.servers[0].priority_players == ("Notch",)
         assert again.servers[1].protocol == "bedrock"
         assert again.notify_joins is True
 
@@ -345,6 +374,10 @@ def test_cloud_protocol_contract() -> None:
         "address": "play.example.org:19132",
         "name": "Bedrock",
         "protocol": "bedrock",
+        "show_in_widget": False,
+        "group_id": None,
+        "sort_order": 0,
+        "priority_players": [],
     }]
     assert cloud_sync._server_from_cloud({
         "address": "play.example.org",
@@ -389,24 +422,20 @@ def test_notify_join_by_name() -> None:
     old = ServerStatus(online=True, online_count=1, max_players=20, players=["Steve"])
     new = ServerStatus(online=True, online_count=2, max_players=20, players=["Steve", "Alex"])
     assert new_players(old, new) == ["Alex"]
-    notice = change_notice("SMP", old, new, config)
+    assert change_notice("SMP", old, new, config) is None
+    notice = change_notice("SMP", old, new, config, ["alex"])
     assert notice and "Alex" in notice.message and "2/20" in notice.message
 
 
-def test_notify_join_by_count() -> None:
+def test_notify_only_priority_players() -> None:
     config = AppConfig(servers=[])
     old = ServerStatus(online=True, online_count=5, max_players=100)
     new = ServerStatus(online=True, online_count=6, max_players=100)
-    notice = change_notice("SMP", old, new, config)
-    assert notice and "+1 игрок" in notice.message
-
-    new.online_count = 7
-    assert "+2 игрока" in (change_notice("SMP", old, new, config) or type("X", (), {"message": ""})).message
-
-    old.online_count = 10
-    new.online_count = 21
-    notice = change_notice("SMP", old, new, config)
-    assert notice and "+11 игроков" in notice.message
+    assert change_notice("SMP", old, new, config, ["Notch"]) is None
+    old.players = ["Notch", "Alex"]
+    new.players = ["Alex"]
+    notice = change_notice("SMP", old, new, config, ["Notch"])
+    assert notice and "вышел Notch" in notice.message
 
 
 def test_notify_offline_online() -> None:
@@ -462,6 +491,7 @@ def test_window_state_clamp() -> None:
 
 def main() -> None:
     tests = [
+        test_global_hotkey_parsing,
         test_parse_mcsrvstat,
         test_parse_mcstatus,
         test_player_list_helpers,
@@ -484,7 +514,7 @@ def main() -> None:
         test_cloud_sync_state_roundtrip,
         test_cloud_session_protection,
         test_notify_join_by_name,
-        test_notify_join_by_count,
+        test_notify_only_priority_players,
         test_notify_offline_online,
         test_icon,
         test_window_state_roundtrip,

@@ -5,7 +5,16 @@ import logging
 import threading
 from dataclasses import replace
 
-from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QEasingCurve,
+    QObject,
+    QPoint,
+    QPointF,
+    Qt,
+    QTimer,
+    QVariantAnimation,
+    Signal,
+)
 from PySide6.QtGui import (
     QColor,
     QIcon,
@@ -41,6 +50,20 @@ from .models import ServerStatus
 from .settings import SettingsDialog
 
 log = logging.getLogger(__name__)
+
+
+def _window_stylesheet(accent_hex: str) -> str:
+    accent = QColor(accent_hex)
+    if not accent.isValid():
+        accent = QColor("#7ee0a3")
+    return (
+        WINDOW_QSS
+        .replace("#9de3b5", accent.lighter(118).name())
+        .replace("#7fcbb5", accent.name())
+        .replace("#b1edc4", accent.lighter(125).name())
+        .replace("#75bc98", accent.name())
+    )
+
 
 WINDOW_QSS = """
 QMainWindow {
@@ -201,10 +224,31 @@ class AuroraSurface(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.phase = 0.0
+        self._accent = QColor("#7ee0a3")
+        self._accent_animation: QVariantAnimation | None = None
         self._timer = QTimer(self)
         self._timer.setInterval(90)
         self._timer.timeout.connect(self._advance)
         self._timer.start()
+
+    def setAccentColor(self, color: QColor) -> None:
+        if not color.isValid():
+            return
+        if self._accent_animation is not None:
+            self._accent_animation.stop()
+        animation = QVariantAnimation(self)
+        animation.setDuration(420)
+        animation.setEasingCurve(QEasingCurve.OutCubic)
+        animation.setStartValue(self._accent)
+        animation.setEndValue(color)
+        animation.valueChanged.connect(self._set_accent)
+        animation.finished.connect(lambda: setattr(self, "_accent_animation", None))
+        self._accent_animation = animation
+        animation.start()
+
+    def _set_accent(self, value: object) -> None:
+        self._accent = QColor(value)
+        self.update()
 
     def _advance(self) -> None:
         self.phase = (self.phase + 0.006) % 1.0
@@ -226,9 +270,15 @@ class AuroraSurface(QWidget):
         travel = (self.phase * 2.0) - 0.5
         green_center = QPointF(bounds.width() * (0.18 + 0.48 * travel), bounds.height() * 0.23)
         green = QRadialGradient(green_center, max(bounds.width(), bounds.height()) * 0.74)
-        green.setColorAt(0.0, QColor(67, 151, 110, 30))
-        green.setColorAt(0.56, QColor(40, 119, 111, 16))
-        green.setColorAt(1.0, QColor(22, 58, 60, 0))
+        accent = QColor(self._accent)
+        accent.setAlpha(30)
+        soft_accent = QColor(self._accent)
+        soft_accent.setAlpha(16)
+        clear_accent = QColor(self._accent)
+        clear_accent.setAlpha(0)
+        green.setColorAt(0.0, accent)
+        green.setColorAt(0.56, soft_accent)
+        green.setColorAt(1.0, clear_accent)
         painter.fillRect(bounds, green)
 
         blue_center = QPointF(
@@ -236,8 +286,16 @@ class AuroraSurface(QWidget):
             bounds.height() * 0.72,
         )
         blue = QRadialGradient(blue_center, max(bounds.width(), bounds.height()) * 0.68)
-        blue.setColorAt(0.0, QColor(53, 121, 145, 22))
-        blue.setColorAt(1.0, QColor(30, 70, 89, 0))
+        neighbor = QColor(self._accent)
+        hue = neighbor.hsvHue()
+        neighbor.setHsv((hue + 38) % 360 if hue >= 0 else 38, neighbor.hsvSaturation(),
+                        neighbor.value())
+        neighbor_glow = QColor(neighbor)
+        neighbor_glow.setAlpha(22)
+        neighbor_clear = QColor(neighbor)
+        neighbor_clear.setAlpha(0)
+        blue.setColorAt(0.0, neighbor_glow)
+        blue.setColorAt(1.0, neighbor_clear)
         painter.fillRect(bounds, blue)
         painter.end()
 
@@ -516,9 +574,11 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(QIcon(str(resource_path("assets/icon.ico"))))
         self.setMinimumSize(390, 500)
         self.resize(430, 530)
-        self.setStyleSheet(WINDOW_QSS)
+        self.setStyleSheet(_window_stylesheet(self.controller.config.accent_color))
 
         surface = AuroraSurface()
+        surface.setAccentColor(QColor(self.controller.config.accent_color))
+        self._aurora_surface = surface
         self.setCentralWidget(surface)
         layout = QVBoxLayout(surface)
         layout.setContentsMargins(22, 18, 22, 16)
@@ -545,7 +605,7 @@ class MainWindow(QMainWindow):
 
         # Поиск
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Поиск серверов и пользователей…")
+        self.search_input.setPlaceholderText("Поиск серверов…")
         self.search_input.setMinimumWidth(200)
         self.search_input.setMaximumWidth(320)
         self.search_input.textChanged.connect(self._on_search_changed)
@@ -709,22 +769,48 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         if self._settings_dialog is None:
-            self._settings_dialog = SettingsDialog(self.controller.config, self)
-            self._settings_dialog.settingsChanged.connect(self._apply_settings)
+            dialog = SettingsDialog(self.controller.config, self)
+            dialog.settingsChanged.connect(self._apply_settings)
+            dialog.finished.connect(self._settings_closed)
+            self._settings_dialog = dialog
         self._settings_dialog.show()
         self._settings_dialog.raise_()
         self._settings_dialog.activateWindow()
 
+    def _settings_closed(self, _result: int) -> None:
+        dialog = self._settings_dialog
+        self._settings_dialog = None
+        if dialog is not None:
+            dialog.deleteLater()
+
     def _apply_settings(self, config: AppConfig) -> None:
-        self.controller.config = config
+        previous_hotkey = self.controller.config.hotkey_show_widget
+        try:
+            self.controller.set_hotkey(config.hotkey_show_widget)
+        except (OSError, RuntimeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Горячая клавиша недоступна",
+                f"Настройки не сохранены. Выберите другое сочетание:\n{exc}",
+            )
+            return
         try:
             save_config(self.controller.config_path, config)
         except OSError as exc:
             log.exception("не удалось сохранить настройки")
+            try:
+                self.controller.set_hotkey(previous_hotkey)
+            except (OSError, RuntimeError, ValueError):
+                log.exception("не удалось восстановить прежнюю горячую клавишу")
             QMessageBox.critical(
                 self, "Не удалось сохранить", f"Настройки не сохранены:\n{exc}"
             )
+            return
+        self.setStyleSheet(_window_stylesheet(config.accent_color))
+        self._aurora_surface.setAccentColor(QColor(config.accent_color))
         self.controller.reload_config()
+        self.controller.widget.resize_to_content()
+        self.controller.widget.update()
 
     def _on_search_changed(self, text: str) -> None:
         # Живой поиск по серверам — фильтруем карточки
@@ -1037,27 +1123,48 @@ class MainWindow(QMainWindow):
 
     def _show_priorities(self, server: ServerConfig) -> None:
         dialog = QDialog(self)
-        dialog.setWindowTitle('Приоритеits — ' + server.name)
+        dialog.setWindowTitle("Приоритеты игроков — " + server.name)
         dialog.setMinimumWidth(340)
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(22, 20, 22, 18)
         layout.setSpacing(12)
-        layout.addWidget(QLabel('Никнеймы для отслеживания (через запятую):'))
+        layout.addWidget(QLabel("Отслеживать вход и выход указанных игроков:"))
         from PySide6.QtWidgets import QTextEdit
         priorities_edit = QTextEdit()
-        priorities_edit.setPlaceholderText('Например: Notch, Jeb_, Dinnerbone')
+        priorities_edit.setPlaceholderText("Например:\nNotch\nJeb_\nDinnerbone")
+        priorities_edit.setPlainText("\n".join(server.priority_players))
         priorities_edit.setMaximumHeight(100)
         layout.addWidget(priorities_edit)
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Save).setText('Сохранить')
-        buttons.button(QDialogButtonBox.Cancel).setText('Отмена')
+        buttons.button(QDialogButtonBox.Save).setText("Сохранить")
+        buttons.button(QDialogButtonBox.Cancel).setText("Отмена")
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
         if dialog.exec() == QDialog.Accepted:
-            raw = priorities_edit.toPlainText()
-            names = [n.strip() for n in raw.replace(',', '\n').split() if n.strip()]
-            QMessageBox.information(self, 'Приоритеты', 'Никнеймы для «' + server.name + '»: ' + (', '.join(names) if names else '(пусто — уведомлений не будет)') + '\n\n(Приоритеты синхронизируются через Supabase при входе в аккаунт.)')
+            raw_names = priorities_edit.toPlainText().replace(",", "\n").splitlines()
+            names: list[str] = []
+            seen: set[str] = set()
+            for raw_name in raw_names:
+                name = raw_name.strip()
+                if not name:
+                    continue
+                if len(name) > 32 or any(character.isspace() for character in name):
+                    QMessageBox.warning(
+                        self,
+                        "Некорректный ник",
+                        "Каждый ник должен быть не длиннее 32 символов и без пробелов.",
+                    )
+                    return
+                if name.casefold() not in seen:
+                    names.append(name)
+                    seen.add(name.casefold())
+            updated = [
+                replace(item, priority_players=tuple(names))
+                if item.address == server.address else item
+                for item in self.controller.config.servers
+            ]
+            self._save_config(updated)
 
     def _show_groups(self, server: ServerConfig) -> None:
         dialog = QDialog(self)
@@ -1070,7 +1177,18 @@ class MainWindow(QMainWindow):
         from PySide6.QtWidgets import QComboBox
         group_combo = QComboBox()
         group_combo.addItem('(без группы)', None)
+        groups = list(dict.fromkeys(
+            item.group_id
+            for item in self.controller.config.servers
+            if item.group_id
+        ))
+        for group_id in groups:
+            group_combo.addItem(group_id, group_id)
         group_combo.addItem('+ Создать новую группу…', '__new__')
+        if server.group_id:
+            existing_index = group_combo.findData(server.group_id)
+            if existing_index >= 0:
+                group_combo.setCurrentIndex(existing_index)
         layout.addWidget(group_combo)
         group_name_input = QLineEdit()
         group_name_input.setPlaceholderText('Название новой группы')
@@ -1090,16 +1208,19 @@ class MainWindow(QMainWindow):
             group_id = group_combo.currentData()
             if group_id == '__new__':
                 name = group_name_input.text().strip()
-                if name:
-                    group_id = 'group_' + str(abs(hash(name)) % 100000)
-                else:
-                    QMessageBox.warning(self, 'Группа', 'Укажите название группы.')
+                if not name or len(name) > 60:
+                    QMessageBox.warning(self, 'Группа', 'Название должно содержать от 1 до 60 символов.')
                     return
+                existing = next(
+                    (group for group in groups if group.casefold() == name.casefold()),
+                    None,
+                )
+                group_id = existing or name
             servers = list(self.controller.config.servers)
             updated = []
             for s in servers:
                 if s.address == server.address:
-                    s = replace(s, group_id=group_id)
+                    s = replace(s, group_id=group_id or None)
                 updated.append(s)
             self._save_config(updated)
 
@@ -1108,18 +1229,22 @@ class MainWindow(QMainWindow):
         dialog.name_input.setText(server.name)
         dialog.address_input.setText(server.address)
         dialog.protocol_input.setCurrentText('Bedrock Edition' if server.protocol == 'bedrock' else 'Java Edition')
-        if dialog.exec() == QDialog.Accepted and dialog.server is not None:
-            servers = list(self.controller.config.servers)
-            updated = []
-            for s in servers:
-                if s.address == server.address:
-                    s = dialog.server
-                    s.show_in_widget = server.show_in_widget
-                    s.group_id = server.group_id
-                    s.sort_order = server.sort_order
-                updated.append(s)
-            self._save_config(updated)
+        if dialog.exec() != QDialog.Accepted or dialog.server is None:
+            return
+        updated_server = replace(
+            dialog.server,
+            show_in_widget=server.show_in_widget,
+            group_id=server.group_id,
+            sort_order=server.sort_order,
+            priority_players=server.priority_players,
+        )
+        updated = [
+            updated_server if item.address == server.address else item
+            for item in self.controller.config.servers
+        ]
+        self._save_config(updated)
 
+    def _save_config(self, servers: list[ServerConfig], *, sync: bool = True) -> None:
         updated = replace(self.controller.config, servers=servers)
         try:
             save_config(self.controller.config_path, updated)
@@ -1194,4 +1319,13 @@ class TrayController:
                 self.controller.main_window,
                 "Системный трей недоступен",
                 "Окно скрыто, но Windows не сообщила о доступной области уведомлений.",
+            )
+
+    def show_message(self, title: str, message: str) -> None:
+        if self.available and self.icon.isVisible():
+            self.icon.showMessage(
+                title,
+                message,
+                QSystemTrayIcon.MessageIcon.Information,
+                5000,
             )

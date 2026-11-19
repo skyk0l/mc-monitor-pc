@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Iterable
 
 from .config import AppConfig
 from .models import ServerStatus
@@ -23,11 +24,30 @@ def new_players(old: ServerStatus | None, new: ServerStatus) -> list[str]:
     return [name for name in new.players if name not in seen]
 
 
+def changed_priority_players(
+    old: ServerStatus | None,
+    new: ServerStatus,
+    priorities: Iterable[str],
+) -> tuple[list[str], list[str]]:
+    """Return joined and left players restricted to the configured watch list."""
+    if not old or not old.online or not new.online:
+        return [], []
+    watched = {name.casefold() for name in priorities if name.strip()}
+    if not watched:
+        return [], []
+    before = {name.casefold(): name for name in old.players}
+    after = {name.casefold(): name for name in new.players}
+    joined = [after[name] for name in watched & (after.keys() - before.keys())]
+    left = [before[name] for name in watched & (before.keys() - after.keys())]
+    return sorted(joined, key=str.casefold), sorted(left, key=str.casefold)
+
+
 def change_notice(
     server_name: str,
     old: ServerStatus | None,
     new: ServerStatus,
     config: AppConfig,
+    priority_players: Iterable[str] = (),
 ) -> Notice | None:
     """Сравнивает два снимка и решает, стоит ли пищать."""
     if old is None:
@@ -39,25 +59,14 @@ def change_notice(
     if not (old.online and new.online):
         return None
 
-    joined = new_players(old, new)
-    if joined and config.notify_joins:
-        preview = ", ".join(joined[:5])
-        if len(joined) > 5:
-            preview += " и др."
-        if len(joined) == 1:
-            message = f"🎮 {server_name}: зашёл {preview} · {new.players_label}"
-        else:
-            message = f"🎮 {server_name}: зашли {preview} · {new.players_label}"
-        return Notice(TITLE, message)
-
-    if new.online_count > old.online_count and config.notify_joins:
-        delta = new.online_count - old.online_count
-        # Many big servers hide the player list — тогда считаем по количеству.
-        if delta == 1:
-            word = "игрок"
-        elif 2 <= delta % 10 <= 4 and not 12 <= delta % 100 <= 14:
-            word = "игрока"
-        else:
-            word = "игроков"
-        return Notice(TITLE, f"🎮 {server_name}: +{delta} {word} · {new.players_label}")
+    if not config.notify_joins:
+        return None
+    joined, left = changed_priority_players(old, new, priority_players)
+    if joined or left:
+        parts: list[str] = []
+        if joined:
+            parts.append("зашёл " + ", ".join(joined[:5]))
+        if left:
+            parts.append("вышел " + ", ".join(left[:5]))
+        return Notice(TITLE, f"🎯 {server_name}: {'; '.join(parts)} · {new.players_label}")
     return None

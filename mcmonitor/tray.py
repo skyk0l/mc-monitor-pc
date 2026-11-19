@@ -75,7 +75,13 @@ class TrayApp:
         for server in servers:
             new_status = results[server.address]
             old_status = self.statuses.get(server.address)
-            notice = change_notice(server.name, old_status, new_status, self.config)
+            notice = change_notice(
+                server.name,
+                old_status,
+                new_status,
+                self.config,
+                server.priority_players,
+            )
             if notice:
                 self._notify(notice.message, notice.title)
             self.statuses[server.address] = new_status

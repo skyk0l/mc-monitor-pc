@@ -115,6 +115,10 @@ def save_servers(session: AccountSession, servers: list[ServerConfig]) -> None:
                     "address": _canonical_address(server),
                     "name": server.name.strip(),
                     "protocol": server.protocol,
+                    "show_in_widget": server.show_in_widget,
+                    "group_id": server.group_id,
+                    "sort_order": server.sort_order,
+                    "priority_players": list(server.priority_players),
                 }
                 for server in servers
             ],
@@ -226,6 +230,10 @@ def write_sync_state(
                 "address": _canonical_address(server),
                 "name": server.name,
                 "protocol": server.protocol,
+                "show_in_widget": server.show_in_widget,
+                "group_id": server.group_id,
+                "sort_order": server.sort_order,
+                "priority_players": list(server.priority_players),
             }
             for server in servers
         ],
@@ -252,18 +260,19 @@ def servers_from_state(state: dict[str, Any]) -> list[ServerConfig] | None:
 
 
 def _server_from_cloud(item: dict[str, Any]) -> ServerConfig:
-    address = str(item.get("address") or "").strip()
-    if not address:
-        raise CloudError("В облачном списке есть сервер без адреса.")
-    name = str(item.get("name") or address).strip()
-    server = ServerConfig.from_address(
-        address, name, protocol=str(item.get("protocol") or "java")
-    )
+    try:
+        server = ServerConfig.parse(item)
+    except ConfigError as exc:
+        raise CloudError("В облачном списке есть некорректная запись сервера.") from exc
     return ServerConfig(
         name=server.name,
         host=server.host.lower(),
         port=server.port,
         protocol=server.protocol,
+        show_in_widget=server.show_in_widget,
+        group_id=server.group_id,
+        sort_order=server.sort_order,
+        priority_players=server.priority_players,
     )
 
 
@@ -278,6 +287,10 @@ def _same_server(first: ServerConfig | None, second: ServerConfig | None) -> boo
         _canonical_address(first) == _canonical_address(second)
         and first.name == second.name
         and first.protocol == second.protocol
+        and first.show_in_widget == second.show_in_widget
+        and first.group_id == second.group_id
+        and first.sort_order == second.sort_order
+        and first.priority_players == second.priority_players
     )
 
 
