@@ -7,7 +7,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-DEFAULT_INTERVAL = 60
+DEFAULT_INTERVAL = 15
+LEGACY_DEFAULT_INTERVAL = 60
 MIN_INTERVAL = 15
 SERVER_PROTOCOLS = ("java", "bedrock")
 
@@ -126,6 +127,8 @@ class AppConfig:
         try:
             interval = int(data.get("poll_interval") or DEFAULT_INTERVAL)
         except (TypeError, ValueError):
+            interval = DEFAULT_INTERVAL
+        if interval == LEGACY_DEFAULT_INTERVAL:
             interval = DEFAULT_INTERVAL
         return cls(
             servers=servers,

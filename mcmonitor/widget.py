@@ -1222,10 +1222,9 @@ class WidgetApp:
             )
             self.statuses[server.address] = status
             if notice:
-                if self.widget.isVisible():
-                    self.show_toast(notice.message)
-                else:
-                    self.tray.show_message(notice.title, notice.message)
+                if not self.tray.show_message(notice.title, notice.message):
+                    if self.widget.isVisible():
+                        self.show_toast(notice.message)
             self.widget.status_changed(server.address)
             self.main_window.refresh_statuses()
         self.pending = max(0, self.pending - 1)
@@ -1256,11 +1255,9 @@ class WidgetApp:
             hotkey_error = exc
         self.timer.setInterval(config.poll_interval * 1000)
         addresses = {server.address for server in config.servers}
-        self.statuses = {
-            address: status
-            for address, status in self.statuses.items()
-            if address in addresses
-        }
+        for address in tuple(self.statuses):
+            if address not in addresses:
+                del self.statuses[address]
         self.widget.display = {
             address: value
             for address, value in self.widget.display.items()

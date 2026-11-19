@@ -2077,7 +2077,7 @@ class TrayController:
                 "Окно скрыто, но Windows не сообщила о доступной области уведомлений.",
             )
 
-    def show_message(self, title: str, message: str) -> None:
+    def show_message(self, title: str, message: str) -> bool:
         if self.available and self.icon.isVisible():
             self.icon.showMessage(
                 title,
@@ -2085,3 +2085,5 @@ class TrayController:
                 QSystemTrayIcon.MessageIcon.Information,
                 5000,
             )
+            return True
+        return False

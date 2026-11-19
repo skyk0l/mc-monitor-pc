@@ -169,6 +169,7 @@ def test_offline_provider() -> None:
 
 def test_fallback_provider() -> None:
     def opener(url: str, timeout: float):
+        assert timeout <= 5
         if "mcsrvstat" in url:
             raise TimeoutError("нет связи")
         return MCSTATUS
@@ -301,7 +302,82 @@ def test_config_interval_floor() -> None:
     config = AppConfig.from_dict({"poll_interval": 1, "servers": []})
     assert config.poll_interval == 15
     config = AppConfig.from_dict({"poll_interval": "abc", "servers": []})
-    assert config.poll_interval == 60
+    assert config.poll_interval == 15
+    config = AppConfig.from_dict({"poll_interval": 60, "servers": []})
+    assert config.poll_interval == 15
+
+
+def test_widget_reload_preserves_status_cache() -> None:
+    from types import SimpleNamespace
+
+    from mcmonitor.widget import WidgetApp
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "servers.json"
+        save_config(
+            path,
+            AppConfig(servers=[ServerConfig("SMP", "keep.example")]),
+        )
+        kept_status = ServerStatus(online=True, online_count=1, players=["Notch"])
+        statuses = {
+            "keep.example": kept_status,
+            "removed.example": ServerStatus(online=True, online_count=2),
+        }
+        controller = object.__new__(WidgetApp)
+        controller.config_path = path
+        controller.statuses = statuses
+        controller.widget = SimpleNamespace(
+            statuses=statuses,
+            display={},
+            expanded=None,
+            _hovered_row=None,
+            resize_to_content=lambda: None,
+            update=lambda: None,
+        )
+        controller.timer = SimpleNamespace(setInterval=lambda _interval: None)
+        controller.set_hotkey = lambda _sequence: None
+        controller.main_window = SimpleNamespace(refresh_servers=lambda: None)
+        controller.show_toast = lambda _message: None
+        controller.refresh = lambda: None
+
+        WidgetApp.reload_config(controller)
+
+        assert controller.statuses is statuses
+        assert controller.widget.statuses is statuses
+        assert statuses == {"keep.example": kept_status}
+
+
+def test_priority_alert_uses_windows_notification_when_widget_is_visible() -> None:
+    from types import SimpleNamespace
+
+    from mcmonitor.widget import WidgetApp
+
+    server = ServerConfig("SMP", "keep.example", priority_players=("Notch",))
+    old = ServerStatus(online=True, online_count=1, players=[])
+    new = ServerStatus(online=True, online_count=2, players=["Notch"])
+    sent: list[tuple[str, str]] = []
+    toasts: list[str] = []
+    controller = object.__new__(WidgetApp)
+    controller.config = AppConfig(servers=[server])
+    controller.statuses = {server.address: old}
+    controller.tray = SimpleNamespace(
+        show_message=lambda title, message: sent.append((title, message)) or True
+    )
+    controller.widget = SimpleNamespace(
+        isVisible=lambda: True,
+        status_changed=lambda _address: None,
+        mark_loading=lambda _loading: None,
+        mark_updated=lambda: None,
+    )
+    controller.main_window = SimpleNamespace(refresh_statuses=lambda: None)
+    controller.show_toast = toasts.append
+    controller.pending = 1
+    controller._refresh_again = False
+
+    WidgetApp._on_status(controller, server, new)
+
+    assert sent and "Notch" in sent[0][1]
+    assert not toasts
 
 
 def test_config_broken_json() -> None:
@@ -636,6 +712,8 @@ def main() -> None:
         test_config_parse,
         test_config_roundtrip,
         test_config_interval_floor,
+        test_widget_reload_preserves_status_cache,
+        test_priority_alert_uses_windows_notification_when_widget_is_visible,
         test_config_broken_json,
         test_cloud_account_identifiers,
         test_cloud_server_merge,

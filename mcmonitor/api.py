@@ -14,7 +14,7 @@ from .config import ServerConfig
 from .models import ServerStatus
 
 USER_AGENT = "mcmonitor/1.1 (Minecraft server monitor)"
-DEFAULT_TIMEOUT = 8.0
+DEFAULT_TIMEOUT = 5.0
 
 # §a, §l и прочие коды форматирования Minecraft
 _FORMAT_CODE = re.compile(r"§.")

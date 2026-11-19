@@ -1,5 +1,5 @@
 {
-  "poll_interval": 60,
+  "poll_interval": 15,
   "notify_joins": true,
   "notify_offline": true,
   "notify_online": true,
