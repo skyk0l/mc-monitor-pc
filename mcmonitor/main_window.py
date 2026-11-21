@@ -1,7 +1,9 @@
 """Основное окно управления серверами и системный трей."""
 from __future__ import annotations
 
+import base64
 import logging
+import math
 import threading
 from dataclasses import replace
 
@@ -69,12 +71,15 @@ def _window_stylesheet(accent_hex: str) -> str:
     accent = QColor(accent_hex)
     if not accent.isValid():
         accent = QColor("#7ee0a3")
+    accent_rgb = f"{accent.red()},{accent.green()},{accent.blue()}"
     return (
         WINDOW_QSS
         .replace("#9de3b5", accent.lighter(118).name())
         .replace("#7fcbb5", accent.name())
         .replace("#b1edc4", accent.lighter(125).name())
         .replace("#75bc98", accent.name())
+        .replace("rgba(125,193,159,24)", f"rgba({accent_rgb},24)")
+        .replace("rgba(161,213,184,60)", f"rgba({accent_rgb},60)")
     )
 
 
@@ -213,6 +218,14 @@ QLabel#statusBadge {
     font-size: 9px;
     font-weight: 900;
 }
+QLabel#serverIcon {
+    color: #c9ded4;
+    background: rgba(125,193,159,24);
+    border: 1px solid rgba(161,213,184,60);
+    border-radius: 9px;
+    font-size: 9px;
+    font-weight: 900;
+}
 QLabel#emptyTitle {
     color: #e4f2e9;
     font-size: 15px;
@@ -315,9 +328,8 @@ class AuroraSurface(QWidget):
         self._accent = QColor("#7ee0a3")
         self._accent_animation: QVariantAnimation | None = None
         self._timer = QTimer(self)
-        self._timer.setInterval(90)
+        self._timer.setInterval(40)
         self._timer.timeout.connect(self._advance)
-        self._timer.start()
 
     def setAccentColor(self, color: QColor) -> None:
         if not color.isValid():
@@ -339,7 +351,7 @@ class AuroraSurface(QWidget):
         self.update()
 
     def _advance(self) -> None:
-        self.phase = (self.phase + 0.006) % 1.0
+        self.phase = (self.phase + 0.0025) % 1.0
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: ANN001
@@ -355,13 +367,18 @@ class AuroraSurface(QWidget):
         base.setColorAt(1.0, QColor("#181e25"))
         painter.fillRect(bounds, base)
 
-        travel = (self.phase * 2.0) - 0.5
-        green_center = QPointF(bounds.width() * (0.18 + 0.48 * travel), bounds.height() * 0.23)
-        green = QRadialGradient(green_center, max(bounds.width(), bounds.height()) * 0.74)
+        angle = self.phase * math.tau
+        green_center = QPointF(
+            bounds.width() * (0.5 + 0.36 * math.sin(angle)),
+            bounds.height() * (0.25 + 0.16 * math.cos(angle)),
+        )
+        green = QRadialGradient(
+            green_center, max(bounds.width(), bounds.height()) * 0.82
+        )
         accent = QColor(self._accent)
-        accent.setAlpha(48)
+        accent.setAlpha(76)
         soft_accent = QColor(self._accent)
-        soft_accent.setAlpha(27)
+        soft_accent.setAlpha(38)
         clear_accent = QColor(self._accent)
         clear_accent.setAlpha(0)
         green.setColorAt(0.0, accent)
@@ -370,22 +387,32 @@ class AuroraSurface(QWidget):
         painter.fillRect(bounds, green)
 
         blue_center = QPointF(
-            bounds.width() * (0.82 - 0.42 * travel),
-            bounds.height() * 0.72,
+            bounds.width() * (0.5 - 0.38 * math.sin(angle + 1.1)),
+            bounds.height() * (0.72 + 0.13 * math.cos(angle + 1.1)),
         )
-        blue = QRadialGradient(blue_center, max(bounds.width(), bounds.height()) * 0.68)
+        blue = QRadialGradient(
+            blue_center, max(bounds.width(), bounds.height()) * 0.74
+        )
         neighbor = QColor(self._accent)
         hue = neighbor.hsvHue()
         neighbor.setHsv((hue + 38) % 360 if hue >= 0 else 38, neighbor.hsvSaturation(),
                         neighbor.value())
         neighbor_glow = QColor(neighbor)
-        neighbor_glow.setAlpha(34)
+        neighbor_glow.setAlpha(52)
         neighbor_clear = QColor(neighbor)
         neighbor_clear.setAlpha(0)
         blue.setColorAt(0.0, neighbor_glow)
         blue.setColorAt(1.0, neighbor_clear)
         painter.fillRect(bounds, blue)
         painter.end()
+
+    def showEvent(self, event) -> None:  # noqa: ANN001
+        super().showEvent(event)
+        self._timer.start()
+
+    def hideEvent(self, event) -> None:  # noqa: ANN001
+        self._timer.stop()
+        super().hideEvent(event)
 
 
 class ServerDialog(QDialog):
@@ -852,6 +879,13 @@ class ServerCard(QFrame):
 
         top = QHBoxLayout()
         top.setSpacing(9)
+        self.server_icon = QLabel()
+        self.server_icon.setObjectName("serverIcon")
+        self.server_icon.setFixedSize(34, 34)
+        self.server_icon.setAlignment(Qt.AlignCenter)
+        self.server_icon.setText("MC")
+        top.addWidget(self.server_icon)
+
         self.dot = QLabel("●")
         self.dot.setFixedWidth(13)
         self.dot.setStyleSheet("color: #d8bd83; font-size: 13px;")
@@ -947,6 +981,7 @@ class ServerCard(QFrame):
 
     def update_status(self, status: ServerStatus | None) -> None:
         if status is None:
+            self._set_server_icon("")
             self.dot.setStyleSheet("color: #d8bd83; font-size: 13px;")
             self.count.setText("—")
             self.status_badge.setText("ПРОВЕРКА")
@@ -954,6 +989,7 @@ class ServerCard(QFrame):
             self.detail.setText("Проверяю сервер…")
             return
         if not status.online:
+            self._set_server_icon(status.favicon)
             self.dot.setStyleSheet("color: #ee8f89; font-size: 13px;")
             self.count.setText("—")
             self.status_badge.setText("ОФФЛАЙН")
@@ -961,11 +997,14 @@ class ServerCard(QFrame):
             self.detail.setText(status.error or "Сервер недоступен")
             return
         self.dot.setStyleSheet("color: #8ed8ac; font-size: 13px;")
+        self._set_server_icon(status.favicon)
         self.status_badge.setText("ОНЛАЙН")
         self._set_status_badge("#a8e8bd", "rgba(85, 172, 117, 40)")
         maximum = f" / {status.max_players}" if status.max_players else ""
         self.count.setText(f"{status.online_count}{maximum}")
         details: list[str] = []
+        if status.first_motd_line:
+            details.append(status.first_motd_line)
         if status.version:
             details.append(status.version)
         if status.unique_players:
@@ -978,6 +1017,20 @@ class ServerCard(QFrame):
         elif status.online_count == 0:
             details.append("Сейчас никого нет")
         self.detail.setText(" · ".join(details) if details else "Сервер онлайн")
+
+    def _set_server_icon(self, encoded: str) -> None:
+        pixmap = QPixmap()
+        try:
+            if encoded and pixmap.loadFromData(base64.b64decode(encoded, validate=True)):
+                self.server_icon.setPixmap(
+                    pixmap.scaled(34, 34, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                )
+                self.server_icon.setText("")
+                return
+        except (ValueError, TypeError):
+            pass
+        self.server_icon.setPixmap(QPixmap())
+        self.server_icon.setText("MC")
 
 
 class MainWindow(QMainWindow):

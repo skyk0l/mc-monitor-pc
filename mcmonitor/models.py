@@ -14,6 +14,7 @@ class ServerStatus:
     players: list[str] = field(default_factory=list)
     version: str = ""
     motd: str = ""
+    favicon: str = ""
     error: str = ""
 
     @property

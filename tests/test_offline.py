@@ -126,6 +126,15 @@ def test_parse_mcsrvstat() -> None:
     assert status.first_motd_line == "Hello"
 
 
+def test_server_icon_is_parsed_and_size_limited() -> None:
+    icon = "data:image/png;base64,YQ=="
+    assert api.parse_mcsrvstat({"online": True, "icon": icon}).favicon == "YQ=="
+    assert api.parse_mcstatus({"online": True, "icon": icon}).favicon == "YQ=="
+    assert api.parse_mcsrvstat({"online": True, "icon": "not-base64"}).favicon == ""
+    oversized = "eA==" * 20_001
+    assert api.parse_mcsrvstat({"online": True, "icon": oversized}).favicon == ""
+
+
 def test_parse_mcstatus() -> None:
     status = api.parse_mcstatus(MCSTATUS)
     assert status.online
@@ -163,7 +172,7 @@ def test_offline_provider() -> None:
 
 def test_fallback_provider() -> None:
     def opener(url: str, timeout: float):
-        assert timeout <= 5
+        assert timeout <= 3
         if "mcsrvstat" in url:
             raise TimeoutError("нет связи")
         return MCSTATUS
@@ -171,6 +180,29 @@ def test_fallback_provider() -> None:
     status = api.fetch_status(ServerConfig("SMP", "example.org"), opener=opener)
     assert status.online
     assert status.players == ["Notch"]
+
+
+def test_status_request_disables_http_caching() -> None:
+    from unittest.mock import patch
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        @staticmethod
+        def read() -> bytes:
+            return b"{}"
+
+    with patch.object(api.urllib.request, "urlopen", return_value=Response()) as urlopen:
+        assert api._get_json("https://example.test/status", timeout=2.5) == {}
+    request = urlopen.call_args.args[0]
+    timeout = urlopen.call_args.kwargs["timeout"]
+    assert request.get_header("Cache-control") == "no-cache"
+    assert request.get_header("Pragma") == "no-cache"
+    assert timeout == 2.5
 
 
 def test_provider_offline_is_final() -> None:
@@ -731,11 +763,13 @@ def main() -> None:
         test_global_hotkey_parsing,
         test_native_hotkey_message_pointer,
         test_parse_mcsrvstat,
+        test_server_icon_is_parsed_and_size_limited,
         test_parse_mcstatus,
         test_player_list_helpers,
         test_hidden_player_list,
         test_offline_provider,
         test_fallback_provider,
+        test_status_request_disables_http_caching,
         test_provider_offline_is_final,
         test_all_providers_dead,
         test_urls,

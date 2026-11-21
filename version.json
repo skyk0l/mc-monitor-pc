@@ -1,5 +1,6 @@
 {
-  "version": "1.3.6",
+  "version": "1.3.7",
   "repository": "skyk0l/mc-monitor-pc",
-  "notes": "Установщик Windows, исправления виджета и горячей клавиши."
+  "download_url": "https://github.com/skyk0l/mc-monitor-pc/releases/latest",
+  "notes": "Ускорено обновление статуса, добавлены иконки серверов и более выразительный фон."
 }

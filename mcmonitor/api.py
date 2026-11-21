@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import base64
 import json
 import re
 import urllib.request
@@ -14,7 +15,7 @@ from .config import ServerConfig
 from .models import ServerStatus
 
 USER_AGENT = "mcmonitor/1.1 (Minecraft server monitor)"
-DEFAULT_TIMEOUT = 5.0
+DEFAULT_TIMEOUT = 3.0
 
 # §a, §l и прочие коды форматирования Minecraft
 _FORMAT_CODE = re.compile(r"§.")
@@ -23,13 +24,35 @@ Opener = Callable[[str, float], Any]
 
 
 def _get_json(url: str, timeout: float = DEFAULT_TIMEOUT) -> Any:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        },
+    )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
 def _clean(text: str) -> str:
     return _FORMAT_CODE.sub("", text).strip()
+
+
+def _clean_icon(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    icon = value.strip()
+    if icon.startswith("data:"):
+        _, separator, icon = icon.partition(",")
+        if not separator:
+            return ""
+    try:
+        decoded = base64.b64decode(icon, validate=True)
+    except (ValueError, TypeError):
+        return ""
+    return icon if 0 < len(decoded) <= 60_000 else ""
 
 
 def _as_int(value: Any, default: int = 0) -> int:
@@ -100,6 +123,7 @@ def parse_mcsrvstat(data: Any) -> ServerStatus:
         players=_names(players.get("list")) if online else [],
         version=str(version),
         motd=_clean(motd_text),
+        favicon=_clean_icon(data.get("icon")),
     )
 
 
@@ -124,6 +148,7 @@ def parse_mcstatus(data: Any) -> ServerStatus:
         players=_names(players.get("list")) if online else [],
         version=str(version),
         motd=_clean(motd_text),
+        favicon=_clean_icon(data.get("icon")),
     )
 
 
