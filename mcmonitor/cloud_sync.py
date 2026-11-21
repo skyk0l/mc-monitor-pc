@@ -44,6 +44,10 @@ class PublicProfile:
     avatar_path: str | None
     share_servers: bool
     is_following: bool
+    share_followers: bool = False
+    share_friends: bool = False
+    share_subscriptions: bool = False
+    is_followed_by: bool = False
 
     @property
     def avatar_url(self) -> str | None:
@@ -51,6 +55,19 @@ class PublicProfile:
             return None
         path = urllib.parse.quote(self.avatar_path, safe="/")
         return f"{PROJECT_URL}/storage/v1/object/public/avatars/{path}"
+
+
+@dataclass(frozen=True)
+class ProfileSocialSummary:
+    followers_count: int
+    subscriptions_count: int
+    friends_count: int
+    is_following: bool
+    is_followed_by: bool
+    can_view_servers: bool
+    can_view_followers: bool
+    can_view_friends: bool
+    can_view_subscriptions: bool
 
 
 @dataclass(frozen=True)
@@ -101,7 +118,8 @@ def sign_in(username: str, password: str) -> AccountSession:
 def fetch_profile(session: AccountSession) -> PublicProfile:
     user_id = urllib.parse.quote(session.user_id, safe="")
     raw = _request_with_session(
-        "/rest/v1/profiles?select=id,username,display_name,bio,avatar_path,share_servers"
+        "/rest/v1/profiles?select=id,username,display_name,bio,avatar_path,share_servers,"
+        "share_followers,share_friends,share_subscriptions"
         f"&id=eq.{user_id}",
         "GET",
         None,
@@ -113,11 +131,30 @@ def fetch_profile(session: AccountSession) -> PublicProfile:
     return _profile_from_row(rows[0], session.user_id)
 
 
+def fetch_public_profile(session: AccountSession, user_id: str) -> PublicProfile:
+    target_id = _validate_user_id(user_id)
+    raw = _request_with_session(
+        "/rest/v1/profiles?select=id,username,display_name,bio,avatar_path,share_servers,"
+        "share_followers,share_friends,share_subscriptions"
+        f"&id=eq.{urllib.parse.quote(target_id, safe='')}",
+        "GET",
+        None,
+        session,
+    )
+    rows = _decode_rows(raw, "публичный профиль")
+    if not rows:
+        raise CloudError("Этот профиль больше недоступен.")
+    return _profile_from_row(rows[0], session.user_id)
+
+
 def update_profile(
     session: AccountSession,
     display_name: str,
     bio: str,
     share_servers: bool,
+    share_followers: bool = False,
+    share_friends: bool = False,
+    share_subscriptions: bool = False,
 ) -> PublicProfile:
     display_name = display_name.strip()
     bio = bio.strip()
@@ -125,8 +162,10 @@ def update_profile(
         raise CloudError("Отображаемое имя должно быть не длиннее 32 символов.")
     if len(bio) > 160:
         raise CloudError("Описание профиля должно быть не длиннее 160 символов.")
-    if not isinstance(share_servers, bool):
-        raise CloudError("Настройка публикации серверов имеет неверный формат.")
+    if any(not isinstance(value, bool) for value in (
+        share_servers, share_followers, share_friends, share_subscriptions
+    )):
+        raise CloudError("Настройка приватности имеет неверный формат.")
     user_id = urllib.parse.quote(session.user_id, safe="")
     raw = _request_with_session(
         f"/rest/v1/profiles?id=eq.{user_id}",
@@ -135,6 +174,9 @@ def update_profile(
             "display_name": display_name,
             "bio": bio,
             "share_servers": share_servers,
+            "share_followers": share_followers,
+            "share_friends": share_friends,
+            "share_subscriptions": share_subscriptions,
         },
         session,
         prefer="return=representation",
@@ -143,6 +185,63 @@ def update_profile(
     if not rows:
         raise CloudError("Не удалось сохранить профиль. Проверь права Supabase.")
     return _profile_from_row(rows[0], session.user_id)
+
+
+def get_profile_social_summary(
+    session: AccountSession, user_id: str
+) -> ProfileSocialSummary:
+    target_id = _validate_user_id(user_id)
+    raw = _request_with_session(
+        "/rest/v1/rpc/get_profile_social_summary",
+        "POST",
+        {"target_user": target_id},
+        session,
+    )
+    rows = _decode_rows(raw, "счётчики профиля")
+    if len(rows) != 1:
+        raise CloudError("Supabase не вернул данные социальных связей профиля.")
+    row = rows[0]
+    counts = (
+        row.get("followers_count"),
+        row.get("subscriptions_count"),
+        row.get("friends_count"),
+    )
+    if any(type(value) is not int or value < 0 for value in counts):
+        raise CloudError("Supabase вернул неверные счётчики профиля.")
+    booleans = (
+        "is_following", "is_followed_by", "can_view_servers",
+        "can_view_followers", "can_view_friends", "can_view_subscriptions",
+    )
+    if any(not isinstance(row.get(key), bool) for key in booleans):
+        raise CloudError("Supabase вернул неверные настройки видимости профиля.")
+    return ProfileSocialSummary(
+        followers_count=counts[0],
+        subscriptions_count=counts[1],
+        friends_count=counts[2],
+        **{key: row[key] for key in booleans},
+    )
+
+
+def list_profile_relationships(
+    session: AccountSession, user_id: str, relationship: str, limit: int = 50
+) -> list[PublicProfile]:
+    target_id = _validate_user_id(user_id)
+    if relationship not in {"followers", "friends", "subscriptions"}:
+        raise CloudError("Неизвестный тип списка профиля.")
+    raw = _request_with_session(
+        "/rest/v1/rpc/list_profile_relationships",
+        "POST",
+        {
+            "target_user": target_id,
+            "relationship": relationship,
+            "result_limit": min(max(int(limit), 1), 100),
+        },
+        session,
+    )
+    return [
+        _profile_from_row(row, session.user_id)
+        for row in _decode_rows(raw, "список профиля")
+    ]
 
 
 def search_profiles(
@@ -319,6 +418,10 @@ def _profile_from_row(
         avatar_path=avatar_path,
         share_servers=bool(row.get("share_servers", False)),
         is_following=bool(row.get("is_following", False)),
+        share_followers=bool(row.get("share_followers", False)),
+        share_friends=bool(row.get("share_friends", False)),
+        share_subscriptions=bool(row.get("share_subscriptions", False)),
+        is_followed_by=bool(row.get("is_followed_by", False)),
     )
 
 

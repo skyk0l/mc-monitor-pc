@@ -3,10 +3,12 @@
 1. In the Supabase SQL Editor, run [`supabase_setup.sql`](./supabase_setup.sql).
 2. Then run [`supabase_public_profiles.sql`](./supabase_public_profiles.sql) to add
    public profiles, avatars, follows, and authenticated search.
-3. In Authentication → Providers → Email, turn off email confirmation. Accounts use a
+3. Then run [`supabase_profile_social_details.sql`](./supabase_profile_social_details.sql)
+   to enable profile privacy controls and follower/friend/subscription data.
+4. In Authentication → Providers → Email, turn off email confirmation. Accounts use a
    generated `*.mcmonitor.invalid` email so users can sign in with a nickname and password
    without an email service.
-4. Keep the project's publishable key in the clients. Never put a `service_role` or secret
+5. Keep the project's publishable key in the clients. Never put a `service_role` or secret
    key in the Android app or desktop executable. Row Level Security on `server_lists`
    restricts each account to its own row.
 
@@ -17,7 +19,9 @@ store session tokens in Android Keystore and Windows DPAPI respectively.
 Profiles are searchable by authenticated users. Avatar files are public JPEGs (up to 2 MB),
 but each account can upload only to its own storage folder. Server-list sharing is disabled
 by default; a user must explicitly enable it in the profile editor before server addresses
-appear in community search or on their profile.
+appear in community search or on their profile. Follower, friend, and user-subscription lists
+are separately opt-in; profile owners can always see their own lists. Friends are reciprocal
+follows.
 
 The clients keep a local copy and synchronize on sign-in, on server-list changes, on
 app startup/resume, and periodically while running. The first sign-in merges local and

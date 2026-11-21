@@ -542,10 +542,15 @@ class ProfileDialog(QDialog):
     saveRequested = Signal()
     avatarSelected = Signal(bytes)
 
-    def __init__(self, username: str, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        username: str,
+        parent: QWidget | None = None,
+        servers: list[ServerConfig] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Мой профиль")
-        self.setModal(True)
+        self.setModal(False)
         self.setMinimumWidth(390)
         self.avatar_bytes: bytes | None = None
 
@@ -577,17 +582,57 @@ class ProfileDialog(QDialog):
         self.bio.setPlaceholderText("Коротко о себе")
         self.bio.setMaximumHeight(90)
         self.share_servers = QCheckBox("Публично показывать адреса моих серверов")
+        self.share_followers = QCheckBox("Показывать подписчиков")
+        self.share_friends = QCheckBox("Показывать друзей")
+        self.share_subscriptions = QCheckBox("Показывать подписки на пользователей")
         form.addRow("Имя", self.display_name)
         form.addRow("О себе", self.bio)
         form.addRow("", self.share_servers)
+        form.addRow("", self.share_followers)
+        form.addRow("", self.share_friends)
+        form.addRow("", self.share_subscriptions)
         layout.addLayout(form)
         privacy_note = QLabel(
-            "Выключено по умолчанию. При включении адреса будут видны "
-            "авторизованным пользователям в поиске."
+            "Каждый список скрыт по умолчанию. Включай только те данные, "
+            "которые хочешь показывать другим пользователям."
         )
         privacy_note.setWordWrap(True)
         privacy_note.setStyleSheet("color: #9db1a7; font-size: 11px;")
         layout.addWidget(privacy_note)
+
+        self.social_summary = QLabel("Подписчики · Подписки · Друзья")
+        self.social_summary.setStyleSheet("font-weight: 700;")
+        layout.addWidget(self.social_summary)
+        self.relationship_tabs = QTabWidget()
+        self.relationship_lists: dict[str, QVBoxLayout] = {}
+        self.relationship_tabs.setMaximumHeight(150)
+        for key, title in (
+            ("followers", "Подписчики"),
+            ("subscriptions", "Подписки"),
+            ("friends", "Друзья"),
+            ("servers", "Серверы"),
+        ):
+            content = QWidget()
+            content_layout = QVBoxLayout(content)
+            content_layout.setContentsMargins(8, 6, 8, 6)
+            content_layout.addWidget(QLabel("Загружаю…"))
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.NoFrame)
+            scroll.setWidget(content)
+            self.relationship_lists[key] = content_layout
+            self.relationship_tabs.addTab(scroll, title)
+        server_layout = self.relationship_lists["servers"]
+        if servers:
+            for server in servers:
+                label = f"{server.name} · {server.address}"
+                if server.group_id:
+                    label += f"  ·  {server.group_id}"
+                server_layout.addWidget(QLabel(label))
+        else:
+            server_layout.addWidget(QLabel("Список серверов пуст."))
+        server_layout.addStretch(1)
+        layout.addWidget(self.relationship_tabs)
 
         self.status = QLabel("Загружаю профиль…")
         self.status.setWordWrap(True)
@@ -604,12 +649,45 @@ class ProfileDialog(QDialog):
         layout.addLayout(buttons)
 
     def set_profile(
-        self, profile: cloud_sync.PublicProfile, avatar_bytes: bytes | None = None
+        self,
+        profile: cloud_sync.PublicProfile,
+        avatar_bytes: bytes | None = None,
+        summary: cloud_sync.ProfileSocialSummary | None = None,
+        relationships: dict[str, list[cloud_sync.PublicProfile]] | None = None,
     ) -> None:
         self.identity.setText("@" + profile.username)
         self.display_name.setText(profile.display_name)
         self.bio.setPlainText(profile.bio)
         self.share_servers.setChecked(profile.share_servers)
+        self.share_followers.setChecked(profile.share_followers)
+        self.share_friends.setChecked(profile.share_friends)
+        self.share_subscriptions.setChecked(profile.share_subscriptions)
+        if summary is not None:
+            self.social_summary.setText(
+                f"{summary.followers_count} подписчиков  ·  "
+                f"{summary.subscriptions_count} подписок  ·  "
+                f"{summary.friends_count} друзей"
+            )
+        if relationships is not None:
+            for key, profiles in relationships.items():
+                layout = self.relationship_lists[key]
+                while layout.count():
+                    item = layout.takeAt(0)
+                    if item.widget() is not None:
+                        item.widget().deleteLater()
+                if profiles:
+                    for person in profiles:
+                        identity = (
+                            f"{person.display_name}  @{person.username}"
+                            if person.display_name
+                            else f"@{person.username}"
+                        )
+                        if key == "friends":
+                            identity += "  ·  Друг"
+                        layout.addWidget(QLabel(identity))
+                else:
+                    layout.addWidget(QLabel("Пока пусто"))
+                layout.addStretch(1)
         if avatar_bytes:
             pixmap = QPixmap()
             if pixmap.loadFromData(avatar_bytes, "JPEG"):
@@ -659,6 +737,7 @@ class CommunityDialog(QDialog):
     followRequested = Signal(str, bool)
     serversRequested = Signal(object)
     addServerRequested = Signal(object)
+    profileRequested = Signal(object)
     avatarLoaded = Signal(object, object)
 
     def __init__(
@@ -788,6 +867,11 @@ class CommunityDialog(QDialog):
                 )
             )
             actions.addWidget(follow)
+            open_profile = _button("Профиль", "quietButton")
+            open_profile.clicked.connect(
+                lambda _checked=False, p=profile: self.profileRequested.emit(p)
+            )
+            actions.addWidget(open_profile)
             if profile.share_servers:
                 servers = _button("Серверы", "quietButton")
                 servers.clicked.connect(
@@ -860,6 +944,177 @@ class CommunityDialog(QDialog):
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
+
+
+class PublicProfileDialog(QDialog):
+    followRequested = Signal(str, bool)
+
+    def __init__(
+        self,
+        profile: cloud_sync.PublicProfile,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Профиль @" + profile.username)
+        self.setModal(False)
+        self.setMinimumSize(420, 470)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 18, 22, 18)
+        layout.setSpacing(10)
+
+        self.avatar = QLabel(profile.username[:1].upper())
+        self.avatar.setFixedSize(72, 72)
+        self.avatar.setAlignment(Qt.AlignCenter)
+        self.avatar.setStyleSheet(
+            "background: rgba(126,224,163,32); border: 1px solid rgba(126,224,163,90); "
+            "border-radius: 36px; font-size: 24px; font-weight: 900;"
+        )
+        layout.addWidget(self.avatar, 0, Qt.AlignHCenter)
+        self.identity = QLabel("@" + profile.username)
+        self.identity.setAlignment(Qt.AlignCenter)
+        self.identity.setStyleSheet("font-size: 17px; font-weight: 800;")
+        layout.addWidget(self.identity)
+        self.bio = QLabel()
+        self.bio.setWordWrap(True)
+        self.bio.setAlignment(Qt.AlignCenter)
+        self.bio.setStyleSheet("color: #9db1a7;")
+        layout.addWidget(self.bio)
+        self.counts = QLabel("Загружаю статистику…")
+        self.counts.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.counts)
+        self.relationship_status = QLabel()
+        self.relationship_status.setAlignment(Qt.AlignCenter)
+        self.relationship_status.setStyleSheet("color: #9de3b5; font-weight: 800;")
+        layout.addWidget(self.relationship_status)
+        self._is_following = False
+        self.follow_button = _button("Подписаться", "quietButton")
+        self.follow_button.clicked.connect(
+            lambda: self.followRequested.emit(
+                profile.user_id, self._is_following
+            )
+        )
+        layout.addWidget(self.follow_button)
+
+        self.tabs = QTabWidget()
+        self.relationship_lists: dict[str, QVBoxLayout] = {}
+        for key, title in (
+            ("followers", "Подписчики"),
+            ("subscriptions", "Подписки"),
+            ("friends", "Друзья"),
+            ("servers", "Серверы"),
+        ):
+            content = QWidget()
+            content_layout = QVBoxLayout(content)
+            content_layout.setContentsMargins(8, 6, 8, 6)
+            content_layout.addWidget(QLabel("Загружаю…"))
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.NoFrame)
+            scroll.setWidget(content)
+            self.relationship_lists[key] = content_layout
+            self.tabs.addTab(scroll, title)
+        layout.addWidget(self.tabs, 1)
+        self.status = QLabel()
+        self.status.setWordWrap(True)
+        self.status.setStyleSheet("color: #9db1a7;")
+        layout.addWidget(self.status)
+
+    def set_profile_data(
+        self,
+        profile: cloud_sync.PublicProfile,
+        avatar: bytes | None,
+        summary: cloud_sync.ProfileSocialSummary,
+        relationships: dict[str, list[cloud_sync.PublicProfile]],
+        servers: list[cloud_sync.PublicServer],
+    ) -> None:
+        self.identity.setText(
+            f"{profile.display_name}  @{profile.username}"
+            if profile.display_name
+            else "@" + profile.username
+        )
+        self.bio.setText(profile.bio)
+        self.counts.setText("  ·  ".join((
+            (f"{summary.followers_count} подписчиков"
+             if summary.can_view_followers else "подписчики скрыты"),
+            (f"{summary.subscriptions_count} подписок"
+             if summary.can_view_subscriptions else "подписки скрыты"),
+            (f"{summary.friends_count} друзей"
+             if summary.can_view_friends else "друзья скрыты"),
+        )))
+        self.relationship_status.setText(
+            "Вы друзья" if summary.is_following and summary.is_followed_by else ""
+        )
+        self._is_following = summary.is_following
+        self.follow_button.setText(
+            "Отписаться" if self._is_following else "Подписаться"
+        )
+        if avatar:
+            pixmap = QPixmap()
+            if pixmap.loadFromData(avatar, "JPEG"):
+                self.avatar.setPixmap(
+                    pixmap.scaled(72, 72, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                )
+                self.avatar.setText("")
+
+        self._set_relationships(
+            "followers",
+            relationships["followers"],
+            summary.can_view_followers,
+        )
+        self._set_relationships(
+            "subscriptions",
+            relationships["subscriptions"],
+            summary.can_view_subscriptions,
+        )
+        self._set_relationships(
+            "friends",
+            relationships["friends"],
+            summary.can_view_friends,
+        )
+        server_layout = self.relationship_lists["servers"]
+        self._clear_layout(server_layout)
+        if not summary.can_view_servers:
+            server_layout.addWidget(QLabel("Список серверов скрыт владельцем профиля."))
+        elif servers:
+            for server in servers:
+                server_layout.addWidget(
+                    QLabel(f"{server.name}\n{server.address} · {server.protocol.upper()}")
+                )
+        else:
+            server_layout.addWidget(QLabel("Публичных серверов нет."))
+        server_layout.addStretch(1)
+        self.status.setText("")
+
+    def _set_relationships(
+        self,
+        key: str,
+        profiles: list[cloud_sync.PublicProfile],
+        visible: bool,
+    ) -> None:
+        layout = self.relationship_lists[key]
+        self._clear_layout(layout)
+        if not visible:
+            layout.addWidget(QLabel("Этот список скрыт владельцем профиля."))
+        elif profiles:
+            for profile in profiles:
+                label = (
+                    f"{profile.display_name}  @{profile.username}"
+                    if profile.display_name
+                    else "@" + profile.username
+                )
+                if key == "friends":
+                    label += "  ·  Друг"
+                layout.addWidget(QLabel(label))
+        else:
+            layout.addWidget(QLabel("Пока пусто."))
+        layout.addStretch(1)
+
+    @staticmethod
+    def _clear_layout(layout: QVBoxLayout) -> None:
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
 
 
 class ServerCard(QFrame):
@@ -1040,6 +1295,7 @@ class MainWindow(QMainWindow):
         self._cards: dict[str, ServerCard] = {}
         self._settings_dialog: SettingsDialog | None = None
         self._profile_dialog: ProfileDialog | None = None
+        self._profile_view_dialogs: dict[str, PublicProfileDialog] = {}
         self._community_dialog: CommunityDialog | None = None
         self._community_request_id = 0
         self.setWindowTitle("MC Monitor")
@@ -1281,7 +1537,11 @@ class MainWindow(QMainWindow):
             self._profile_dialog.show()
             self._profile_dialog.raise_()
             return
-        dialog = ProfileDialog(session.username, self)
+        dialog = ProfileDialog(
+            session.username,
+            self,
+            servers=list(self.controller.config.servers),
+        )
         self._profile_dialog = dialog
         dialog.saveRequested.connect(lambda current=dialog: self._save_profile(current))
         dialog.finished.connect(lambda _result: self._clear_profile_dialog(dialog))
@@ -1300,6 +1560,9 @@ class MainWindow(QMainWindow):
             display_name=dialog.display_name.text(),
             bio=dialog.bio.toPlainText(),
             share_servers=dialog.share_servers.isChecked(),
+            share_followers=dialog.share_followers.isChecked(),
+            share_friends=dialog.share_friends.isChecked(),
+            share_subscriptions=dialog.share_subscriptions.isChecked(),
             avatar=dialog.avatar_bytes,
         )
         dialog.status.setText("Сохраняю профиль…")
@@ -1335,6 +1598,7 @@ class MainWindow(QMainWindow):
         self._community_dialog = dialog
         dialog.followRequested.connect(self._community_follow)
         dialog.serversRequested.connect(self._community_profile_servers)
+        dialog.profileRequested.connect(self._community_open_profile)
         dialog.addServerRequested.connect(self._add_public_server)
         dialog.finished.connect(lambda _result: self._clear_community_dialog(dialog))
         dialog.lookupRequested.connect(self._schedule_community_lookup)
@@ -1404,6 +1668,45 @@ class MainWindow(QMainWindow):
             request_id=self._community_request_id,
         )
 
+    def _community_open_profile(self, profile: cloud_sync.PublicProfile) -> None:
+        dialog = self._profile_view_dialogs.get(profile.user_id)
+        if dialog is None:
+            dialog = PublicProfileDialog(profile, self)
+            self._profile_view_dialogs[profile.user_id] = dialog
+            dialog.followRequested.connect(self._public_profile_follow)
+            dialog.finished.connect(
+                lambda _result, user_id=profile.user_id, current=dialog:
+                    self._clear_public_profile_dialog(user_id, current)
+            )
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        dialog.status.setText("Загружаю профиль…")
+        self._run_social(
+            "profile_view",
+            dialog=dialog,
+            user_id=profile.user_id,
+        )
+
+    def _public_profile_follow(self, user_id: str, is_following: bool) -> None:
+        dialog = self._profile_view_dialogs.get(user_id)
+        if dialog is None:
+            return
+        dialog.status.setText("Обновляю подписку…")
+        self._run_social(
+            "profile_view_follow",
+            dialog=dialog,
+            user_id=user_id,
+            is_following=is_following,
+        )
+
+    def _clear_public_profile_dialog(
+        self, user_id: str, dialog: PublicProfileDialog
+    ) -> None:
+        if self._profile_view_dialogs.get(user_id) is dialog:
+            del self._profile_view_dialogs[user_id]
+        dialog.deleteLater()
+
     def _add_public_server(self, server: cloud_sync.PublicServer) -> None:
         try:
             config = ServerConfig.from_address(
@@ -1422,6 +1725,9 @@ class MainWindow(QMainWindow):
         config_path = self.controller.config_path
 
         def worker() -> None:
+            response_action = (
+                "profile_view" if action == "profile_view_follow" else action
+            )
             try:
                 session = cloud_sync.load_session(config_path)
                 if session is None:
@@ -1429,19 +1735,74 @@ class MainWindow(QMainWindow):
                 if action == "profile_load":
                     profile = cloud_sync.fetch_profile(session)
                     result = (profile, cloud_sync.download_avatar(profile))
+                    summary = cloud_sync.get_profile_social_summary(
+                        session, profile.user_id
+                    )
+                    relationships = {
+                        relationship: cloud_sync.list_profile_relationships(
+                            session, profile.user_id, relationship
+                        )
+                        for relationship in ("followers", "subscriptions", "friends")
+                    }
+                    result = (profile, result[1], summary, relationships)
+                elif action in {"profile_view", "profile_view_follow"}:
+                    if action == "profile_view_follow":
+                        mutate = (
+                            cloud_sync.unfollow_profile
+                            if payload["is_following"]
+                            else cloud_sync.follow_profile
+                        )
+                        mutate(session, payload["user_id"])
+                    profile = cloud_sync.fetch_public_profile(
+                        session, payload["user_id"]
+                    )
+                    avatar = cloud_sync.download_avatar(profile)
+                    summary = cloud_sync.get_profile_social_summary(
+                        session, profile.user_id
+                    )
+                    relationships = {
+                        relationship: (
+                            cloud_sync.list_profile_relationships(
+                                session, profile.user_id, relationship
+                            )
+                            if visible else []
+                        )
+                        for relationship, visible in (
+                            ("followers", summary.can_view_followers),
+                            ("subscriptions", summary.can_view_subscriptions),
+                            ("friends", summary.can_view_friends),
+                        )
+                    }
+                    servers = (
+                        cloud_sync.list_public_servers(session, profile.user_id)
+                        if summary.can_view_servers else []
+                    )
+                    result = (profile, avatar, summary, relationships, servers)
                 elif action == "profile_save":
                     profile = cloud_sync.update_profile(
                         session,
                         payload["display_name"],
                         payload["bio"],
                         payload["share_servers"],
+                        payload["share_followers"],
+                        payload["share_friends"],
+                        payload["share_subscriptions"],
                     )
                     if payload.get("avatar") is not None:
                         profile = cloud_sync.upload_avatar(session, payload["avatar"])
                         avatar_data = payload["avatar"]
                     else:
                         avatar_data = cloud_sync.download_avatar(profile)
-                    result = (profile, avatar_data)
+                    summary = cloud_sync.get_profile_social_summary(
+                        session, profile.user_id
+                    )
+                    relationships = {
+                        relationship: cloud_sync.list_profile_relationships(
+                            session, profile.user_id, relationship
+                        )
+                        for relationship in ("followers", "subscriptions", "friends")
+                    }
+                    result = (profile, avatar_data, summary, relationships)
                 elif action == "community_profiles":
                     result = cloud_sync.search_profiles(session, payload["query"])
                 elif action == "community_servers":
@@ -1463,7 +1824,7 @@ class MainWindow(QMainWindow):
                     raise cloud_sync.CloudError("Неизвестная операция сообщества.")
                 cloud_sync.save_session(config_path, session)
                 self._social_bridge.completed.emit({
-                    "action": action,
+                    "action": response_action,
                     "dialog": dialog,
                     "payload": payload,
                     "result": result,
@@ -1471,7 +1832,7 @@ class MainWindow(QMainWindow):
                 })
             except (cloud_sync.CloudError, OSError, ValueError) as exc:
                 self._social_bridge.completed.emit({
-                    "action": action,
+                    "action": response_action,
                     "dialog": dialog,
                     "payload": payload,
                     "result": None,
@@ -1484,15 +1845,24 @@ class MainWindow(QMainWindow):
         action = response["action"]
         dialog = response.get("dialog")
         error = response.get("error")
+        if action == "profile_view" and isinstance(dialog, PublicProfileDialog):
+            if error:
+                dialog.status.setText(error)
+            else:
+                profile, avatar, summary, relationships, servers = response["result"]
+                dialog.set_profile_data(
+                    profile, avatar, summary, relationships, servers
+                )
+            return
         if action.startswith("profile_") and dialog is self._profile_dialog:
             if error:
                 dialog.status.setText(error)
             elif action == "profile_load":
-                profile, avatar = response["result"]
-                dialog.set_profile(profile, avatar)
+                profile, avatar, summary, relationships = response["result"]
+                dialog.set_profile(profile, avatar, summary, relationships)
             elif action == "profile_save":
-                profile, avatar = response["result"]
-                dialog.set_profile(profile, avatar)
+                profile, avatar, summary, relationships = response["result"]
+                dialog.set_profile(profile, avatar, summary, relationships)
                 dialog.accept()
                 QMessageBox.information(self, "Профиль", "Изменения сохранены.")
             return

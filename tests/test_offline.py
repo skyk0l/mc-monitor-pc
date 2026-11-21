@@ -27,7 +27,11 @@ from mcmonitor.config import (  # noqa: E402
 from mcmonitor.icon import make_icon, save_ico  # noqa: E402
 from mcmonitor.hotkeys import _native_message_address, parse_hotkey  # noqa: E402
 from mcmonitor.models import ServerStatus  # noqa: E402
-from mcmonitor.notify import change_notice, new_players  # noqa: E402
+from mcmonitor.notify import (  # noqa: E402
+    change_notice,
+    new_players,
+    notifications_allowed,
+)
 from mcmonitor.ui_state import WindowState, load_state, save_state  # noqa: E402
 
 MCSRVSTAT = {
@@ -594,26 +598,110 @@ def test_public_profile_requests_are_scoped_and_opt_in() -> None:
         if path.startswith("/rest/v1/profiles?id="):
             return (
                 '[{"id":"' + user_id + '","username":"Current",'
-                '"display_name":"Builder","bio":"Hi","share_servers":false}]'
+                '"display_name":"Builder","bio":"Hi","share_servers":false,'
+                '"share_followers":true,"share_friends":true,'
+                '"share_subscriptions":false}]'
             )
         return "[]"
 
     cloud_sync._request_with_session = capture_request
     try:
-        profile = cloud_sync.update_profile(session, " Builder ", " Hi ", False)
+        profile = cloud_sync.update_profile(
+            session, " Builder ", " Hi ", False, True, True, False
+        )
         matches = cloud_sync.search_profiles(session, "  block ")
     finally:
         cloud_sync._request_with_session = original_request
 
     assert profile.display_name == "Builder" and not profile.share_servers
+    assert profile.share_followers and profile.share_friends
+    assert not profile.share_subscriptions
     assert calls[0][0] == f"/rest/v1/profiles?id=eq.{user_id}"
     assert calls[0][2] == {
         "display_name": "Builder",
         "bio": "Hi",
         "share_servers": False,
+        "share_followers": True,
+        "share_friends": True,
+        "share_subscriptions": False,
     }
     assert calls[1][2] == {"search_term": "block", "result_limit": 20}
     assert matches[0].username == "BlockBuilder"
+
+
+def test_profile_social_summary_and_relationships() -> None:
+    user_id = "123e4567-e89b-12d3-a456-426614174000"
+    friend_id = "123e4567-e89b-12d3-a456-426614174001"
+    session = cloud_sync.AccountSession("access", "refresh", user_id, "Current")
+    calls: list[tuple[str, dict]] = []
+    original_request = cloud_sync._request_with_session
+
+    def capture_request(path, method, body, request_session, prefer=None, **kwargs):
+        calls.append((path, body))
+        if path.endswith("get_profile_social_summary"):
+            return (
+                '[{"followers_count":4,"subscriptions_count":3,"friends_count":2,'
+                '"is_following":true,"is_followed_by":true,"can_view_servers":true,'
+                '"can_view_followers":true,"can_view_friends":true,'
+                '"can_view_subscriptions":true}]'
+            )
+        return (
+            '[{"id":"' + friend_id + '","username":"Friend","is_following":true,'
+            '"is_followed_by":true}]'
+        )
+
+    cloud_sync._request_with_session = capture_request
+    try:
+        summary = cloud_sync.get_profile_social_summary(session, user_id)
+        friends = cloud_sync.list_profile_relationships(session, user_id, "friends")
+    finally:
+        cloud_sync._request_with_session = original_request
+
+    assert (summary.followers_count, summary.subscriptions_count, summary.friends_count) == (
+        4, 3, 2
+    )
+    assert summary.is_following and summary.is_followed_by
+    assert friends[0].username == "Friend" and friends[0].is_followed_by
+    assert calls[0] == (
+        "/rest/v1/rpc/get_profile_social_summary", {"target_user": user_id}
+    )
+    assert calls[1][1] == {
+        "target_user": user_id,
+        "relationship": "friends",
+        "result_limit": 50,
+    }
+
+
+def test_public_profile_lookup_uses_validated_target() -> None:
+    user_id = "123e4567-e89b-12d3-a456-426614174001"
+    session = cloud_sync.AccountSession(
+        "access",
+        "refresh",
+        "123e4567-e89b-12d3-a456-426614174000",
+        "Current",
+    )
+    calls: list[str] = []
+    original_request = cloud_sync._request_with_session
+
+    def capture_request(path, method, body, request_session, prefer=None, **kwargs):
+        calls.append(path)
+        return (
+            '[{"id":"' + user_id + '","username":"Friend",'
+            '"share_servers":false,"share_followers":true}]'
+        )
+
+    cloud_sync._request_with_session = capture_request
+    try:
+        profile = cloud_sync.fetch_public_profile(session, user_id)
+    finally:
+        cloud_sync._request_with_session = original_request
+
+    assert profile.user_id == user_id and profile.share_followers
+    assert calls == [
+        "/rest/v1/profiles?select=id,username,display_name,bio,avatar_path,share_servers,"
+        "share_followers,share_friends,share_subscriptions&"
+        f"id=eq.{user_id}"
+    ]
 
 
 def test_public_profile_mutations_reject_self_follow_and_invalid_images() -> None:
@@ -692,6 +780,43 @@ def test_notify_join_by_name() -> None:
     assert change_notice("SMP", old, new, config) is None
     notice = change_notice("SMP", old, new, config, ["alex"])
     assert notice and "Alex" in notice.message and "2/20" in notice.message
+
+
+def test_notification_window_and_do_not_disturb() -> None:
+    from dataclasses import replace
+    from datetime import datetime
+
+    config = AppConfig(
+        notification_start_minute=8 * 60,
+        notification_end_minute=22 * 60,
+    )
+    assert not notifications_allowed(config, datetime(2026, 1, 1, 7, 59))
+    assert notifications_allowed(config, datetime(2026, 1, 1, 8, 0))
+    assert notifications_allowed(config, datetime(2026, 1, 1, 21, 59))
+    assert not notifications_allowed(config, datetime(2026, 1, 1, 22, 0))
+
+    overnight = replace(
+        config,
+        notification_start_minute=22 * 60,
+        notification_end_minute=6 * 60,
+    )
+    assert notifications_allowed(overnight, datetime(2026, 1, 1, 23, 0))
+    assert notifications_allowed(overnight, datetime(2026, 1, 1, 5, 59))
+    assert not notifications_allowed(overnight, datetime(2026, 1, 1, 12, 0))
+
+    assert not notifications_allowed(
+        replace(config, notification_dnd_until=-1),
+        datetime(2026, 1, 1, 12, 0),
+    )
+    deadline = datetime(2026, 1, 1, 13, 0).timestamp()
+    assert not notifications_allowed(
+        replace(config, notification_dnd_until=deadline),
+        datetime(2026, 1, 1, 12, 0),
+    )
+    assert notifications_allowed(
+        replace(config, notification_dnd_until=deadline),
+        datetime(2026, 1, 1, 14, 0),
+    )
 
 
 def test_notify_only_priority_players() -> None:
@@ -788,11 +913,14 @@ def main() -> None:
         test_cloud_protocol_contract,
         test_public_profile_validation_and_avatar_url,
         test_public_profile_requests_are_scoped_and_opt_in,
+        test_profile_social_summary_and_relationships,
+        test_public_profile_lookup_uses_validated_target,
         test_public_profile_mutations_reject_self_follow_and_invalid_images,
         test_public_avatar_upload_is_owner_scoped_jpeg,
         test_cloud_sync_state_roundtrip,
         test_cloud_session_protection,
         test_notify_join_by_name,
+        test_notification_window_and_do_not_disturb,
         test_notify_only_priority_players,
         test_notify_offline_online,
         test_icon,

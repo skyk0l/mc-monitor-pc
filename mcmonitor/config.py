@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import sys
@@ -110,6 +111,9 @@ class AppConfig:
     notify_joins: bool = True
     notify_offline: bool = True
     notify_online: bool = True
+    notification_start_minute: int = 0
+    notification_end_minute: int = 1440
+    notification_dnd_until: float = 0
     accent_color: str = "#7ee0a3"
     widget_bg_color: str = "#252B30"
     widget_opacity: float = 0.85
@@ -132,12 +136,31 @@ class AppConfig:
             interval = DEFAULT_INTERVAL
         if interval == LEGACY_DEFAULT_INTERVAL:
             interval = DEFAULT_INTERVAL
+        try:
+            notification_start = int(data.get("notification_start_minute", 0))
+        except (TypeError, ValueError):
+            notification_start = 0
+        try:
+            notification_end = int(data.get("notification_end_minute", 1440))
+        except (TypeError, ValueError):
+            notification_end = 1440
+        notification_start = min(max(notification_start, 0), 1439)
+        notification_end = min(max(notification_end, 0), 1440)
+        try:
+            dnd_until = float(data.get("notification_dnd_until", 0))
+        except (TypeError, ValueError):
+            dnd_until = 0
+        if not math.isfinite(dnd_until) or (dnd_until < 0 and dnd_until != -1):
+            dnd_until = 0
         return cls(
             servers=servers,
             poll_interval=max(MIN_INTERVAL, interval),
             notify_joins=bool(data.get("notify_joins", True)),
             notify_offline=bool(data.get("notify_offline", True)),
             notify_online=bool(data.get("notify_online", True)),
+            notification_start_minute=notification_start,
+            notification_end_minute=notification_end,
+            notification_dnd_until=dnd_until,
             accent_color=str(data.get("accent_color", "#7ee0a3")),
             widget_bg_color=str(data.get("widget_bg_color", "#252B30")),
             widget_opacity=float(data.get("widget_opacity", 0.85)),
@@ -151,6 +174,9 @@ class AppConfig:
             "notify_joins": self.notify_joins,
             "notify_offline": self.notify_offline,
             "notify_online": self.notify_online,
+            "notification_start_minute": self.notification_start_minute,
+            "notification_end_minute": self.notification_end_minute,
+            "notification_dnd_until": self.notification_dnd_until,
             "accent_color": self.accent_color,
             "widget_bg_color": self.widget_bg_color,
             "widget_opacity": self.widget_opacity,

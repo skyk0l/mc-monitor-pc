@@ -3,11 +3,32 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import Iterable
+from datetime import datetime
 
 from .config import AppConfig
 from .models import ServerStatus
 
 TITLE = "MC Monitor"
+
+
+def notifications_allowed(
+    config: AppConfig, now: datetime | None = None
+) -> bool:
+    current_time = now or datetime.now().astimezone()
+    dnd_until = config.notification_dnd_until
+    if dnd_until == -1 or (
+        dnd_until > 0 and current_time.timestamp() < dnd_until
+    ):
+        return False
+
+    minute = current_time.hour * 60 + current_time.minute
+    start = config.notification_start_minute
+    end = config.notification_end_minute
+    if start == end:
+        return False
+    if start < end:
+        return start <= minute < end
+    return minute >= start or minute < end
 
 
 @dataclass(frozen=True)
@@ -50,6 +71,8 @@ def change_notice(
     priority_players: Iterable[str] = (),
 ) -> Notice | None:
     """Сравнивает два снимка и решает, стоит ли пищать."""
+    if not notifications_allowed(config):
+        return None
     if old is None:
         return None  # первая проверка — просто запоминаем состояние
     if old.online and not new.online and config.notify_offline:

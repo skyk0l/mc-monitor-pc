@@ -1,14 +1,16 @@
 """Настройки внешнего вида, цветов виджетов и горячих клавиш (только ПК)."""
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from typing import Any
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QTime, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPaintEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QColorDialog,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFrame,
@@ -18,6 +20,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QTimeEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -156,6 +159,45 @@ class SettingsDialog(QDialog):
         customBtn.clicked.connect(self._pickCustomColor)
         cl.addWidget(customBtn)
 
+        cl.addWidget(self._section("Уведомления"))
+        cl.addWidget(QLabel("Разрешённое время уведомлений (локальное время)"))
+        notificationTimeRow = QHBoxLayout()
+        start = self._working.notification_start_minute
+        end = self._working.notification_end_minute
+        self.notificationStart = QTimeEdit(QTime(start // 60, start % 60))
+        self.notificationEnd = QTimeEdit(
+            QTime((end % 1440) // 60, end % 60)
+        )
+        self.notificationStart.setDisplayFormat("HH:mm")
+        self.notificationEnd.setDisplayFormat("HH:mm")
+        notificationTimeRow.addWidget(QLabel("С"))
+        notificationTimeRow.addWidget(self.notificationStart)
+        notificationTimeRow.addWidget(QLabel("до"))
+        notificationTimeRow.addWidget(self.notificationEnd)
+        notificationTimeRow.addStretch(1)
+        cl.addLayout(notificationTimeRow)
+        self.dndMode = QComboBox()
+        for title, duration in (
+            ("Не беспокоить выключен", 0),
+            ("На 1 час", 3600),
+            ("На 3 часа", 10800),
+            ("На 8 часов", 28800),
+            ("Пока не отключу", -1),
+            ("Оставить активным", -2),
+        ):
+            self.dndMode.addItem(title, duration)
+        dnd_until = self._working.notification_dnd_until
+        if dnd_until == -1:
+            self.dndMode.setCurrentIndex(4)
+        elif dnd_until > time.time():
+            self.dndMode.setCurrentIndex(5)
+        cl.addWidget(self.dndMode)
+        self.dndStatus = QLabel()
+        self.dndStatus.setStyleSheet("color: #8ca99d; font-size: 11px;")
+        self.dndMode.currentIndexChanged.connect(self._update_dnd_status)
+        cl.addWidget(self.dndStatus)
+        self._update_dnd_status()
+
         cl.addWidget(self._section("Цвета виджетов"))
 
         self.widgetBgBtn = self._colorButton("Фон виджета", self._working.widget_bg_color)
@@ -233,6 +275,23 @@ class SettingsDialog(QDialog):
         for chip in self.accentChips:
             chip.setSelected(chip.color().name() == self._working.accent_color)
 
+    def _update_dnd_status(self) -> None:
+        mode = self.dndMode.currentData()
+        if mode == 0:
+            text = "Не беспокоить выключен."
+        elif mode == -1:
+            text = "Не беспокоить будет активно до ручного отключения."
+        elif mode == -2 and self._working.notification_dnd_until == -1:
+            text = "Не беспокоить активно — до отключения вручную."
+        elif mode == -2 and self._working.notification_dnd_until > time.time():
+            end_time = time.strftime(
+                "%H:%M", time.localtime(self._working.notification_dnd_until)
+            )
+            text = f"Не беспокоить активно до {end_time}."
+        else:
+            text = "Не беспокоить будет включён после сохранения."
+        self.dndStatus.setText(text)
+
     def _pickAccent(self, color: QColor) -> None:
         self._working = replace(self._working, accent_color=color.name())
         self.gradientPreview.setAccent(color)
@@ -262,10 +321,34 @@ class SettingsDialog(QDialog):
 
     def _save(self) -> None:
         hk = self.hotkeyEdit.keySequence().toString()
+        notification_start = (
+            self.notificationStart.time().hour() * 60
+            + self.notificationStart.time().minute()
+        )
+        notification_end = (
+            self.notificationEnd.time().hour() * 60
+            + self.notificationEnd.time().minute()
+        )
+        if notification_start == 0 and notification_end == 0:
+            notification_end = 1440
         self._working = replace(
             self._working,
             hotkey_show_widget=hk,
             widget_opacity=self.opacitySlider.value() / 100,
+            notification_start_minute=notification_start,
+            notification_end_minute=notification_end,
+        )
+        dnd_duration = self.dndMode.currentData()
+        if dnd_duration == -1:
+            dnd_until = -1
+        elif dnd_duration == -2:
+            dnd_until = self._working.notification_dnd_until
+        elif dnd_duration:
+            dnd_until = time.time() + dnd_duration
+        else:
+            dnd_until = 0
+        self._working = replace(
+            self._working, notification_dnd_until=dnd_until
         )
         self.settingsChanged.emit(self._working)
         self.accept()
