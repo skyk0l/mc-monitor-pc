@@ -19,11 +19,13 @@ from PySide6.QtCore import (
     QSize,
     Qt,
     QTimer,
+    QPropertyAnimation,
     QVariantAnimation,
     Signal,
 )
 from PySide6.QtGui import (
     QColor,
+    QFontMetrics,
     QImage,
     QIcon,
     QDrag,
@@ -184,6 +186,17 @@ QToolButton#accountButton:hover {
     background: rgba(67, 103, 87, 220);
     border-color: rgba(179, 231, 199, 130);
 }
+QToolButton#serverMenuButton {
+    color: #d7e8df;
+    background: rgba(36, 57, 58, 210);
+    border: 1px solid rgba(133, 188, 177, 52);
+    border-radius: 11px;
+}
+QToolButton#serverMenuButton:hover {
+    color: #ffffff;
+    background: rgba(67, 103, 87, 220);
+    border-color: rgba(179, 231, 199, 110);
+}
 QPushButton {
     color: #e8f4ec;
     background: rgba(125, 193, 159, 42);
@@ -327,12 +340,13 @@ def _button(text: str, object_name: str = "") -> QPushButton:
     return button
 
 
-def _action_icon(kind: str) -> QIcon:
+def _action_icon(kind: str, color: str = "#c9ddd3") -> QIcon:
     pixmap = QPixmap(64, 64)
     pixmap.fill(Qt.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing)
-    painter.setPen(QPen(QColor("#c9ddd3"), 5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    icon_color = QColor(color)
+    painter.setPen(QPen(icon_color, 5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
     if kind == "search":
         painter.drawEllipse(QRectF(9, 8, 34, 34))
         painter.drawLine(QPointF(36, 36), QPointF(54, 54))
@@ -343,19 +357,21 @@ def _action_icon(kind: str) -> QIcon:
         shoulders.cubicTo(44, 33, 54, 39, 55, 54)
         painter.drawPath(shoulders)
     elif kind == "settings":
-        painter.drawEllipse(QRectF(17, 17, 30, 30))
-        painter.drawEllipse(QRectF(27, 27, 10, 10))
-        for start, end in (
-            ((32, 4), (32, 17)),
-            ((32, 47), (32, 60)),
-            ((4, 32), (17, 32)),
-            ((47, 32), (60, 32)),
-            ((12, 12), (21, 21)),
-            ((43, 43), (52, 52)),
-            ((12, 52), (21, 43)),
-            ((43, 21), (52, 12)),
-        ):
-            painter.drawLine(QPointF(*start), QPointF(*end))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(icon_color)
+        for angle in range(0, 360, 45):
+            painter.save()
+            painter.translate(32, 32)
+            painter.rotate(angle)
+            painter.drawRoundedRect(QRectF(-5, -28, 10, 16), 2, 2)
+            painter.restore()
+        painter.drawEllipse(QRectF(14, 14, 36, 36))
+        painter.setCompositionMode(QPainter.CompositionMode_Clear)
+        painter.drawEllipse(QRectF(25, 25, 14, 14))
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+    elif kind == "close":
+        painter.drawLine(QPointF(17, 17), QPointF(47, 47))
+        painter.drawLine(QPointF(47, 17), QPointF(17, 47))
     elif kind == "refresh":
         painter.drawArc(QRectF(12, 12, 40, 40), 38 * 16, 285 * 16)
         painter.drawLine(QPointF(43, 12), QPointF(54, 12))
@@ -371,6 +387,8 @@ class AuroraSurface(QWidget):
         super().__init__()
         self.phase = 0.0
         self._accent = QColor("#7ee0a3")
+        self._background_style = 0
+        self._background_pattern = 0
         self._accent_animation: QVariantAnimation | None = None
         self._timer = QTimer(self)
         self._timer.setInterval(40)
@@ -391,6 +409,11 @@ class AuroraSurface(QWidget):
         self._accent_animation = animation
         animation.start()
 
+    def setAppearance(self, background_style: int, background_pattern: int) -> None:
+        self._background_style = min(max(background_style, 0), 4)
+        self._background_pattern = min(max(background_pattern, 0), 2)
+        self.update()
+
     def _set_accent(self, value: object) -> None:
         self._accent = QColor(value)
         self.update()
@@ -404,12 +427,18 @@ class AuroraSurface(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
         bounds = self.rect()
 
-        base = QLinearGradient(
-            QPointF(bounds.topLeft()), QPointF(bounds.bottomRight())
+        palettes = (
+            ("#1a292b", "#203936", "#232f3a"),
+            ("#1b2c3b", "#213c50", "#263348"),
+            ("#29263e", "#35334f", "#343347"),
+            ("#382a31", "#423632", "#303844"),
+            ("#252a30", "#2c3036", "#252a30"),
         )
-        base.setColorAt(0.0, QColor("#172122"))
-        base.setColorAt(0.52, QColor("#132623"))
-        base.setColorAt(1.0, QColor("#181e25"))
+        colors = palettes[self._background_style]
+        base = QLinearGradient(QPointF(bounds.topLeft()), QPointF(bounds.bottomRight()))
+        base.setColorAt(0.0, QColor(colors[0]))
+        base.setColorAt(0.52, QColor(colors[1]))
+        base.setColorAt(1.0, QColor(colors[2]))
         painter.fillRect(bounds, base)
 
         angle = self.phase * math.tau
@@ -449,6 +478,34 @@ class AuroraSurface(QWidget):
         blue.setColorAt(0.0, neighbor_glow)
         blue.setColorAt(1.0, neighbor_clear)
         painter.fillRect(bounds, blue)
+
+        if self._background_pattern == 1:
+            wave_pen = QPen(QColor(255, 255, 255, 20), 1.2)
+            painter.setPen(wave_pen)
+            painter.setBrush(Qt.NoBrush)
+            for index in range(5):
+                y = bounds.height() * (0.32 + index * 0.13)
+                drift = math.sin(angle + index * 0.7) * bounds.width() * 0.025
+                wave = QPainterPath(QPointF(bounds.left(), y))
+                wave.cubicTo(
+                    bounds.width() * 0.28 + drift,
+                    y - bounds.height() * 0.08,
+                    bounds.width() * 0.68 - drift,
+                    y + bounds.height() * 0.08,
+                    bounds.right(),
+                    y,
+                )
+                painter.drawPath(wave)
+        elif self._background_pattern == 2:
+            orbit_pen = QPen(QColor(255, 255, 255, 18), 1.0)
+            painter.setPen(orbit_pen)
+            painter.setBrush(Qt.NoBrush)
+            center = QPointF(
+                bounds.width() * (0.76 + 0.05 * math.sin(angle)),
+                bounds.height() * (0.28 + 0.04 * math.cos(angle)),
+            )
+            for radius in (36, 68, 100, 132):
+                painter.drawEllipse(center, radius, radius * 0.62)
         painter.end()
 
     def showEvent(self, event) -> None:  # noqa: ANN001
@@ -1644,7 +1701,8 @@ class ServerCard(QFrame):
         super().__init__(parent)
         self.server = server
         self.setObjectName("serverCard")
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.setMinimumWidth(0)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(15, 13, 14, 12)
@@ -1668,9 +1726,13 @@ class ServerCard(QFrame):
         self.dot.setStyleSheet("color: #d8bd83; font-size: 13px;")
         top.addWidget(self.dot)
 
-        self.name = QLabel(("📌 " if server.pinned else "") + server.name)
+        self._full_name = ("📌 " if server.pinned else "") + server.name
+        self.name = QLabel(self._full_name)
         self.name.setStyleSheet("font-size: 16px; font-weight: 900;")
         self.name.setMinimumWidth(0)
+        self.name.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.name.setToolTip(self._full_name)
+        self.name.setAccessibleName(self._full_name)
         top.addWidget(self.name, 1)
 
         self.protocol_badge = QLabel("JAVA" if server.protocol != "bedrock" else "BEDROCK")
@@ -1700,6 +1762,9 @@ class ServerCard(QFrame):
         self.address.setStyleSheet(
             "color: #9ab5aa; font-size: 11px; font-weight: 700;"
         )
+        self.address.setMinimumWidth(0)
+        self.address.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.address.setToolTip(server.address)
         self.address.setTextInteractionFlags(Qt.TextSelectableByMouse)
         address_row.addWidget(self.address, 1)
         self.status_badge = QLabel(tr("ОЖИДАНИЕ"))
@@ -1740,16 +1805,24 @@ class ServerCard(QFrame):
         actions.addWidget(remove_button)
 
         menu_button = QToolButton()
-        menu_button.setText("⋮")
+        menu_button.setObjectName("serverMenuButton")
+        menu_button.setIcon(_action_icon("settings"))
+        menu_button.setIconSize(QSize(18, 18))
+        menu_button.setFixedSize(32, 32)
         menu_button.setCursor(Qt.PointingHandCursor)
-        menu_button.setStyleSheet(
-            "QToolButton { color: #8ca99d; font-size: 20px; background: transparent; border: none; padding: 4px; }"
-            "QToolButton:hover { color: #ffffff; background: rgba(255,255,255,10); border-radius: 8px; }"
-        )
+        menu_button.setToolTip(tr("Настройки сервера"))
+        menu_button.setAccessibleName(tr("Настройки сервера"))
         menu_button.clicked.connect(lambda: self.menuRequested.emit(server.address, menu_button.mapToGlobal(menu_button.rect().bottomLeft())))
         actions.addWidget(menu_button)
         root.addLayout(actions)
 
+    def resizeEvent(self, event) -> None:  # noqa: ANN001
+        super().resizeEvent(event)
+        self.name.setText(
+            QFontMetrics(self.name.font()).elidedText(
+                self._full_name, Qt.ElideRight, max(0, self.name.width())
+            )
+        )
 
     def _set_status_badge(self, color: str, background: str) -> None:
         self.status_badge.setStyleSheet(
@@ -1876,6 +1949,8 @@ class MainWindow(QMainWindow):
         self._avatar_loading_user: str | None = None
         self._avatar_attempted_user: str | None = None
         self._account_avatar_cache: tuple[str, bytes] | None = None
+        self._search_open = False
+        self._search_animation: QPropertyAnimation | None = None
         self.setWindowTitle("MC Monitor")
         self.setWindowIcon(QIcon(str(resource_path("assets/icon.ico"))))
         self.setMinimumSize(410, 580)
@@ -1884,6 +1959,10 @@ class MainWindow(QMainWindow):
 
         surface = AuroraSurface()
         surface.setAccentColor(QColor(self.controller.config.accent_color))
+        surface.setAppearance(
+            self.controller.config.background_style,
+            self.controller.config.background_pattern,
+        )
         self._aurora_surface = surface
         self.setCentralWidget(surface)
         layout = QVBoxLayout(surface)
@@ -1927,9 +2006,8 @@ class MainWindow(QMainWindow):
         header.addWidget(self.search_button)
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText(tr("Поиск серверов…"))
-        self.search_input.setMinimumWidth(120)
-        self.search_input.setMaximumWidth(280)
+        self.search_input.setMinimumWidth(0)
+        self.search_input.setMaximumWidth(0)
         self.search_input.setPlaceholderText(
             tr("Мои серверы · Enter — общий поиск")
         )
@@ -1955,7 +2033,9 @@ class MainWindow(QMainWindow):
 
         self.settings_button = QToolButton()
         self.settings_button.setObjectName("settingsButton")
-        self.settings_button.setIcon(_action_icon("settings"))
+        self.settings_button.setIcon(
+            _action_icon("settings", self.controller.config.accent_color)
+        )
         self.settings_button.setIconSize(QSize(21, 21))
         self.settings_button.setFixedSize(40, 40)
         self.settings_button.setToolTip(tr("Настройки"))
@@ -2051,6 +2131,8 @@ class MainWindow(QMainWindow):
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.list_content = QWidget()
+        self.list_content.setMinimumWidth(0)
+        self.list_content.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.list_layout = QVBoxLayout(self.list_content)
         self.list_layout.setContentsMargins(0, 0, 4, 0)
         self.list_layout.setSpacing(10)
@@ -2590,7 +2672,7 @@ class MainWindow(QMainWindow):
                         )
                     }
                     servers = (
-                        cloud_sync.list_public_servers(session, profile.user_id)
+                        cloud_sync.list_public_servers(session, profile)
                         if summary.can_view_servers else []
                     )
                     result = (profile, avatar, summary, relationships, servers)
@@ -2630,7 +2712,7 @@ class MainWindow(QMainWindow):
                     result = cloud_sync.list_followed_profiles(session)
                 elif action == "community_user_servers":
                     profile = payload["profile"]
-                    result = cloud_sync.list_public_servers(session, profile.user_id)
+                    result = cloud_sync.list_public_servers(session, profile)
                 elif action in {"community_follow", "community_unfollow"}:
                     mutate = (
                         cloud_sync.follow_profile
@@ -2806,6 +2888,11 @@ class MainWindow(QMainWindow):
             return
         self.setStyleSheet(_window_stylesheet(config.accent_color))
         self._aurora_surface.setAccentColor(QColor(config.accent_color))
+        self.settings_button.setIcon(_action_icon("settings", config.accent_color))
+        self._aurora_surface.setAppearance(
+            config.background_style,
+            config.background_pattern,
+        )
         self.controller.reload_config()
         self._retranslate_ui()
         self.controller.tray.retranslate()
@@ -2908,23 +2995,48 @@ class MainWindow(QMainWindow):
         )
 
     def _toggle_search(self) -> None:
-        opening = not self.search_input.isVisible()
+        opening = not self._search_open
+        if self._search_animation is not None:
+            self._search_animation.stop()
+            self._search_animation.deleteLater()
+            self._search_animation = None
         if opening:
+            self._search_open = True
             self.search_input.show()
             self.header_spacer.hide()
-            self.search_button.setIcon(QIcon())
-            self.search_button.setText("×")
+            self.search_button.setIcon(_action_icon("close"))
             self.search_button.setToolTip(tr("Закрыть поиск"))
             self.search_button.setAccessibleName(tr("Закрыть поиск"))
-            self.search_input.setFocus()
+            self.search_input.setFocus(Qt.OtherFocusReason)
+        else:
+            self._search_open = False
+            self.search_input.clear()
+            self.search_button.setIcon(_action_icon("search"))
+            self.search_button.setToolTip(tr("Поиск серверов"))
+            self.search_button.setAccessibleName(tr("Поиск серверов"))
+
+        animation = QPropertyAnimation(self.search_input, b"maximumWidth", self)
+        animation.setDuration(220)
+        animation.setEasingCurve(QEasingCurve.OutCubic)
+        animation.setStartValue(self.search_input.maximumWidth())
+        animation.setEndValue(280 if opening else 0)
+        animation.finished.connect(
+            lambda current=animation, is_opening=opening:
+                self._finish_search_animation(current, is_opening)
+        )
+        self._search_animation = animation
+        animation.start()
+
+    def _finish_search_animation(
+        self, animation: QPropertyAnimation, opening: bool
+    ) -> None:
+        if self._search_animation is not animation:
             return
-        self.search_input.clear()
-        self.search_input.hide()
-        self.header_spacer.show()
-        self.search_button.setText("")
-        self.search_button.setIcon(_action_icon("search"))
-        self.search_button.setToolTip(tr("Поиск серверов"))
-        self.search_button.setAccessibleName(tr("Поиск серверов"))
+        self._search_animation = None
+        if not opening and not self._search_open:
+            self.search_input.hide()
+            self.header_spacer.show()
+        animation.deleteLater()
 
     def _logout(self) -> None:
         try:

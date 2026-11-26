@@ -181,6 +181,8 @@ class AppConfig:
     notification_dnd_until: float = 0
     server_sort_mode: str = "manual"
     accent_color: str = "#7ee0a3"
+    background_style: int = 0
+    background_pattern: int = 0
     widget_bg_color: str = "#252B30"
     widget_opacity: float = 0.85
     widget_accent_color: str = "#A7C6A4"
@@ -232,6 +234,16 @@ class AppConfig:
         language = str(data.get("language") or "system")
         if language not in {"system", "ru", "en"}:
             language = "system"
+        try:
+            background_style = min(max(int(data.get("background_style", 0)), 0), 4)
+        except (TypeError, ValueError, OverflowError):
+            background_style = 0
+        try:
+            background_pattern = min(
+                max(int(data.get("background_pattern", 0)), 0), 2
+            )
+        except (TypeError, ValueError, OverflowError):
+            background_pattern = 0
         return cls(
             servers=servers,
             language=language,
@@ -244,6 +256,8 @@ class AppConfig:
             notification_dnd_until=dnd_until,
             server_sort_mode=sort_mode,
             accent_color=str(data.get("accent_color", "#7ee0a3")),
+            background_style=background_style,
+            background_pattern=background_pattern,
             widget_bg_color=str(data.get("widget_bg_color", "#252B30")),
             widget_opacity=float(data.get("widget_opacity", 0.85)),
             widget_accent_color=str(data.get("widget_accent_color", "#A7C6A4")),
@@ -263,6 +277,8 @@ class AppConfig:
             "notification_dnd_until": self.notification_dnd_until,
             "server_sort_mode": self.server_sort_mode,
             "accent_color": self.accent_color,
+            "background_style": self.background_style,
+            "background_pattern": self.background_pattern,
             "widget_bg_color": self.widget_bg_color,
             "widget_opacity": self.widget_opacity,
             "widget_accent_color": self.widget_accent_color,

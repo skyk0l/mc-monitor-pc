@@ -180,6 +180,33 @@ class SettingsDialog(QDialog):
         customBtn.clicked.connect(self._pickCustomColor)
         cl.addWidget(customBtn)
 
+        cl.addWidget(self._section("Фон приложения"))
+        self.backgroundStyleSelector = QComboBox()
+        for label, style in (
+            ("Северное сияние", 0),
+            ("Океан", 1),
+            ("Сумерки", 2),
+            ("Янтарный горизонт", 3),
+            ("Графит", 4),
+        ):
+            self.backgroundStyleSelector.addItem(tr(label), style)
+        self.backgroundStyleSelector.setCurrentIndex(
+            self.backgroundStyleSelector.findData(self._working.background_style)
+        )
+        cl.addWidget(self.backgroundStyleSelector)
+
+        self.backgroundPatternSelector = QComboBox()
+        for label, pattern in (
+            ("Мягкое свечение", 0),
+            ("Волны", 1),
+            ("Орбиты", 2),
+        ):
+            self.backgroundPatternSelector.addItem(tr(label), pattern)
+        self.backgroundPatternSelector.setCurrentIndex(
+            self.backgroundPatternSelector.findData(self._working.background_pattern)
+        )
+        cl.addWidget(self.backgroundPatternSelector)
+
         cl.addWidget(self._section("Уведомления"))
         cl.addWidget(QLabel(tr("Разрешённое время уведомлений (локальное время)")))
         notificationTimeRow = QHBoxLayout()
@@ -236,6 +263,12 @@ class SettingsDialog(QDialog):
         self.opacitySlider = QSlider(Qt.Horizontal)
         self.opacitySlider.setRange(40, 100)
         self.opacitySlider.setValue(int(self._working.widget_opacity * 100))
+        self.opacitySlider.setStyleSheet(
+            "QSlider::groove:horizontal { height: 2px; background: #59645f; }"
+            "QSlider::sub-page:horizontal { background: #a7c6a4; }"
+            "QSlider::handle:horizontal { width: 8px; height: 8px; margin: -3px 0;"
+            " border-radius: 4px; background: #ffffff; border: none; }"
+        )
         self.opacitySlider.valueChanged.connect(
             lambda v: self.opacityValue.setText(f"{v}%")
         )
@@ -569,6 +602,8 @@ class SettingsDialog(QDialog):
         self._working = replace(
             self._working,
             language=str(self.languageSelector.currentData()),
+            background_style=int(self.backgroundStyleSelector.currentData()),
+            background_pattern=int(self.backgroundPatternSelector.currentData()),
             hotkey_show_widget=hk,
             widget_opacity=self.opacitySlider.value() / 100,
             notification_start_minute=notification_start,

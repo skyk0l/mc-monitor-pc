@@ -407,6 +407,25 @@ def test_ping_sort_mode_is_valid_and_persistent() -> None:
     assert AppConfig.from_dict(config.to_dict()).server_sort_mode == "ping"
 
 
+def test_background_style_and_pattern_are_persistent_and_bounded() -> None:
+    config = AppConfig.from_dict({
+        "background_style": 3,
+        "background_pattern": 2,
+        "servers": [],
+    })
+    restored = AppConfig.from_dict(config.to_dict())
+    assert restored.background_style == 3
+    assert restored.background_pattern == 2
+
+    clamped = AppConfig.from_dict({
+        "background_style": 99,
+        "background_pattern": -4,
+        "servers": [],
+    })
+    assert clamped.background_style == 4
+    assert clamped.background_pattern == 0
+
+
 def test_config_interval_floor() -> None:
     config = AppConfig.from_dict({"servers": []})
     assert config.poll_interval == 10

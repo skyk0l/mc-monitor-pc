@@ -656,17 +656,20 @@ def list_server_catalog_history(
 
 
 def list_public_servers(
-    session: AccountSession, user_id: str, limit: int = 50
+    session: AccountSession, profile: PublicProfile, limit: int = 50
 ) -> list[PublicServer]:
-    _validate_user_id(user_id)
+    _validate_user_id(profile.user_id)
     raw = _request_with_session(
         "/rest/v1/rpc/list_public_servers",
         "POST",
-        {"target_user": user_id, "result_limit": min(max(int(limit), 1), 100)},
+        {
+            "target_user": profile.user_id,
+            "result_limit": min(max(int(limit), 1), 100),
+        },
         session,
     )
     return [
-        _server_from_public_row(row, owner_id=user_id)
+        _server_from_public_row(row, owner_profile=profile)
         for row in _decode_rows(raw, "публичные серверы")
     ]
 
@@ -706,7 +709,9 @@ def download_avatar(profile: PublicProfile) -> bytes | None:
     except urllib.error.HTTPError as exc:
         raise CloudError("Не удалось загрузить аватар.", exc.code) from exc
     except urllib.error.URLError as exc:
-        raise CloudError(f"Нет соединения с Supabase: {exc.reason}") from exc
+        raise CloudError(
+            "Не удалось подключиться к облаку. Проверьте интернет-соединение и повторите попытку."
+        ) from exc
     if len(data) > 2 * 1024 * 1024 or not data.startswith(b"\xff\xd8\xff"):
         raise CloudError("Supabase вернул некорректный файл аватара.")
     return data
@@ -769,10 +774,12 @@ def _profile_from_row(
 
 
 def _server_from_public_row(
-    row: dict[str, Any], owner_id: str | None = None
+    row: dict[str, Any], owner_profile: PublicProfile | None = None
 ) -> PublicServer:
     address = row.get("server_address")
-    username = row.get("username", "")
+    username = row.get("username")
+    if username is None and owner_profile is not None:
+        username = owner_profile.username
     if not isinstance(address, str) or not address.strip():
         raise CloudError("Supabase вернул публичный сервер без адреса.")
     if not isinstance(username, str) or not _USERNAME.fullmatch(username):
@@ -780,15 +787,28 @@ def _server_from_public_row(
     protocol = row.get("protocol")
     if protocol not in {"java", "bedrock"}:
         protocol = "java"
-    raw_owner_id = row.get("owner_id") or owner_id or ""
+    raw_owner_id = row.get("owner_id") or (
+        owner_profile.user_id if owner_profile is not None else ""
+    )
     try:
         validated_owner_id = _validate_user_id(str(raw_owner_id))
     except CloudError as exc:
         raise CloudError("Supabase вернул сервер с неверным владельцем.") from exc
+    if owner_profile is not None and validated_owner_id != owner_profile.user_id:
+        raise CloudError("Supabase вернул сервер с неверным владельцем.")
+    if (
+        owner_profile is not None
+        and row.get("username") is not None
+        and username != owner_profile.username
+    ):
+        raise CloudError("Supabase вернул сервер с неверным владельцем.")
     return PublicServer(
         owner_id=validated_owner_id,
         username=username,
-        display_name=str(row.get("display_name") or ""),
+        display_name=str(
+            row.get("display_name")
+            or (owner_profile.display_name if owner_profile is not None else "")
+        ),
         name=str(row.get("server_name") or address),
         address=address,
         protocol=protocol,
@@ -1130,24 +1150,69 @@ def _request_text(
             return response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         payload = exc.read().decode("utf-8", errors="replace")
-        raise CloudError(_response_error(payload), exc.code) from exc
+        raise CloudError(_response_error(payload, exc.code), exc.code) from exc
     except urllib.error.URLError as exc:
-        raise CloudError(f"Нет соединения с Supabase: {exc.reason}") from exc
+        raise CloudError(
+            "Не удалось подключиться к облаку. Проверьте интернет-соединение и повторите попытку."
+        ) from exc
     except TimeoutError as exc:
-        raise CloudError("Превышено время ожидания ответа Supabase.") from exc
+        raise CloudError(
+            "Облачный сервис не ответил вовремя. Повторите попытку позже."
+        ) from exc
 
 
-def _response_error(payload: str) -> str:
+def _response_error(payload: str, status_code: int | None = None) -> str:
     try:
         data = json.loads(payload)
-        if isinstance(data, dict):
-            for field in ("msg", "message", "error_description", "error"):
-                message = data.get(field)
-                if message:
-                    return str(message)
     except json.JSONDecodeError:
-        pass
-    return payload or "Ошибка запроса к Supabase."
+        data = None
+
+    if not isinstance(data, dict):
+        return "Облачный сервис временно недоступен. Повторите попытку позже."
+
+    message = next(
+        (
+            str(data[field])
+            for field in ("msg", "message", "error_description", "error")
+            if data.get(field)
+        ),
+        "",
+    )
+    code = str(data.get("code") or "")
+    normalized = f"{code} {message}".casefold()
+
+    missing_privacy_column = any(
+        column in normalized
+        for column in ("share_followers", "share_friends", "share_subscriptions")
+    ) and ("does not exist" in normalized or code == "42703")
+    if missing_privacy_column:
+        return (
+            "Схема профилей не обновлена. Примените supabase_public_profiles.sql, "
+            "затем supabase_profile_social_details.sql."
+        )
+    if "server_catalog" in normalized and "function" in normalized:
+        return (
+            "Каталог Supabase не настроен. Примените "
+            "supabase_server_catalog.sql и повторите попытку."
+        )
+    if "invalid login credentials" in normalized:
+        return "Неверный никнейм/email или пароль."
+    if "email not confirmed" in normalized:
+        return "Подтвердите email и повторите вход."
+    if "already registered" in normalized or (
+        "duplicate key" in normalized and "username" in normalized
+    ):
+        return "Аккаунт с таким никнеймом или email уже существует."
+    if status_code == 429 or "rate limit" in normalized or "too many requests" in normalized:
+        return "Слишком много попыток. Попробуйте позже."
+    if (
+        code == "42501"
+        or "row-level security" in normalized
+        or "permission denied" in normalized
+    ):
+        return "Недостаточно прав для этого действия."
+
+    return "Облачный сервис временно недоступен. Повторите попытку позже."
 
 
 def _session_path(config_path: Path) -> Path:
