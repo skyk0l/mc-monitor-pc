@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 
 from . import __version__
 from .config import is_installed_by_setup, resource_path
+from .i18n import tr
 
 log = logging.getLogger(__name__)
 _REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -252,7 +253,8 @@ class UpdateDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(
-            "Установка MC Monitor" if install_only else "Доступно обновление"
+            tr("Установка MC Monitor")
+            if install_only else tr("Доступно обновление")
         )
         self.setMinimumWidth(420)
         self._release = release
@@ -264,9 +266,13 @@ class UpdateDialog(QDialog):
         layout.setSpacing(12)
         notes = str(release.get("notes") or "").strip()
         description = (
-            f"Версия {release['version']} готова к установке."
+            tr("Версия {version} готова к установке.").format(
+                version=release["version"]
+            )
             if install_only
-            else f"Доступна версия {release['version']}."
+            else tr("Доступна версия {version}.").format(
+                version=release["version"]
+            )
         )
         layout.addWidget(
             QLabel(
@@ -279,18 +285,19 @@ class UpdateDialog(QDialog):
         self.progress.setValue(0)
         layout.addWidget(self.progress)
         self.status = QLabel(
-            "Проверенный установщик откроет мастер: можно выбрать папку, "
-            "а после установки запустить MC Monitor."
+            tr("Проверенный установщик откроет мастер: можно выбрать папку, "
+               "а после установки запустить MC Monitor.")
         )
         layout.addWidget(self.status)
 
         buttons = QDialogButtonBox()
         self.download_button = buttons.addButton(
-            "Открыть установщик" if install_only else "Скачать и установить",
+            tr("Открыть установщик")
+            if install_only else tr("Скачать и установить"),
             QDialogButtonBox.AcceptRole,
         )
         self.close_button = buttons.addButton(
-            "Закрыть", QDialogButtonBox.RejectRole
+            tr("Закрыть"), QDialogButtonBox.RejectRole
         )
         self.download_button.clicked.connect(self._download_or_open)
         self.close_button.clicked.connect(self.reject)
@@ -307,7 +314,7 @@ class UpdateDialog(QDialog):
 
         self.download_button.setEnabled(False)
         self.close_button.setEnabled(False)
-        self.status.setText("Скачивание и проверка файла…")
+        self.status.setText(tr("Скачивание и проверка файла…"))
         thread = DownloadThread(self._release, self)
         self._download_thread = thread
         thread.progress.connect(self.progress.setValue)
@@ -319,8 +326,10 @@ class UpdateDialog(QDialog):
     def _on_downloaded(self, path: str) -> None:
         self._downloaded_path = Path(path)
         if sys.platform != "win32" or not getattr(sys, "frozen", False):
-            self.status.setText(f"Файл скачан и проверен:\n{path}")
-            self.download_button.setText("Открыть папку")
+            self.status.setText(
+                tr("Файл скачан и проверен:\n{path}").format(path=path)
+            )
+            self.download_button.setText(tr("Открыть папку"))
             self.download_button.setEnabled(True)
             self.close_button.setEnabled(True)
             return
@@ -334,19 +343,22 @@ class UpdateDialog(QDialog):
             )
         except (OSError, ValueError) as exc:
             log.exception("Не удалось запустить установщик")
-            self.status.setText(f"Файл проверен, но установщик не запустился: {exc}")
-            self.download_button.setText("Открыть папку")
+            self.status.setText(
+                tr("Файл проверен, но установщик не запустился: {error}")
+                .format(error=tr(str(exc)))
+            )
+            self.download_button.setText(tr("Открыть папку"))
             self.download_button.setEnabled(True)
             self.close_button.setEnabled(True)
             return
 
-        self.status.setText("Открываю мастер установки…")
+        self.status.setText(tr("Открываю мастер установки…"))
         self.download_button.setEnabled(False)
         self.close_button.setEnabled(False)
         QApplication.instance().quit()
 
     def _on_error(self, message: str) -> None:
-        self.status.setText("Ошибка: " + message)
+        self.status.setText(tr("Ошибка: ") + tr(message))
         self.download_button.setEnabled(True)
         self.close_button.setEnabled(True)
 
@@ -364,15 +376,15 @@ def check_for_updates(parent=None, *, silent: bool = False) -> None:
         if silent:
             log.warning("Проверка обновлений отключена: %s", exc)
         else:
-            QMessageBox.warning(parent, "Обновления", str(exc))
+            QMessageBox.warning(parent, tr("Обновления"), tr(str(exc)))
         return
 
     if not repository:
         if not silent:
             QMessageBox.information(
                 parent,
-                "Обновления",
-                "Автообновление будет доступно после настройки GitHub-репозитория.",
+                tr("Обновления"),
+                tr("Автообновление будет доступно после настройки GitHub-репозитория."),
             )
         return
 
@@ -393,7 +405,9 @@ def check_for_updates(parent=None, *, silent: bool = False) -> None:
             if needs_install:
                 UpdateDialog(release, parent, install_only=True).exec()
             elif not silent:
-                QMessageBox.information(parent, "Обновления", "Установлена последняя версия.")
+                QMessageBox.information(
+                    parent, tr("Обновления"), tr("Установлена последняя версия.")
+                )
             return
         dialog = UpdateDialog(release, parent)
         dialog.exec()
@@ -401,7 +415,9 @@ def check_for_updates(parent=None, *, silent: bool = False) -> None:
     def on_error(message: str) -> None:
         log.warning("Не удалось проверить обновления: %s", message)
         if not silent:
-            QMessageBox.warning(parent, "Не удалось проверить обновления", message)
+            QMessageBox.warning(
+                parent, tr("Не удалось проверить обновления"), tr(message)
+            )
 
     checker.found.connect(on_found)
     checker.error.connect(on_error)

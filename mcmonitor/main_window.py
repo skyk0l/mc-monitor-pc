@@ -65,6 +65,7 @@ from PySide6.QtWidgets import (
 from .config import ConfigError, ServerConfig, resource_path, save_config
 from . import cloud_sync
 from .auto_update import check_for_updates
+from .i18n import current_language, tr
 from .models import ServerStatus
 from .settings import SettingsDialog
 
@@ -94,11 +95,11 @@ def _catalog_error_text(error: str) -> str:
         and "function" in lowered_error
         and "server_catalog" in lowered_error
     ):
-        return (
+        return tr(
             "Каталог Supabase ещё не настроен. Примените "
             "supabase_server_catalog.sql и повторите попытку."
         )
-    return error
+    return tr(error)
 
 
 def _circular_avatar(data: bytes, size: int) -> QPixmap:
@@ -462,7 +463,7 @@ class AuroraSurface(QWidget):
 class ServerDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Добавить сервер")
+        self.setWindowTitle(tr("Добавить сервер"))
         self.setModal(True)
         self.setMinimumWidth(340)
         self.server: ServerConfig | None = None
@@ -471,22 +472,24 @@ class ServerDialog(QDialog):
         layout.setContentsMargins(22, 20, 22, 18)
         layout.setSpacing(14)
 
-        title = QLabel("Новый сервер")
+        title = QLabel(tr("Новый сервер"))
         title.setStyleSheet("font-size: 19px; font-weight: 700;")
         layout.addWidget(title)
 
         form = QFormLayout()
         form.setSpacing(10)
         self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("Например, Выживание")
+        self.name_input.setPlaceholderText(tr("Например, Выживание"))
         self.address_input = QLineEdit()
-        self.address_input.setPlaceholderText("play.example.com или host:порт")
+        self.address_input.setPlaceholderText(
+            tr("play.example.com или host:порт")
+        )
         self.protocol_input = QComboBox()
         self.protocol_input.addItem("Java Edition", "java")
         self.protocol_input.addItem("Bedrock Edition", "bedrock")
-        form.addRow("Название", self.name_input)
-        form.addRow("Адрес", self.address_input)
-        form.addRow("Издание", self.protocol_input)
+        form.addRow(tr("Название"), self.name_input)
+        form.addRow(tr("Адрес"), self.address_input)
+        form.addRow(tr("Издание"), self.protocol_input)
         layout.addLayout(form)
 
         self.error_label = QLabel("")
@@ -497,6 +500,8 @@ class ServerDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.Save | QDialogButtonBox.Cancel
         )
+        buttons.button(QDialogButtonBox.Save).setText(tr("Сохранить"))
+        buttons.button(QDialogButtonBox.Cancel).setText(tr("Отмена"))
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -515,7 +520,7 @@ class ServerDialog(QDialog):
             if server.port is not None and not 1 <= server.port <= 65535:
                 raise ConfigError("Порт должен быть от 1 до 65535.")
         except ConfigError as exc:
-            self.error_label.setText(str(exc))
+            self.error_label.setText(tr(str(exc)))
             return
         self.server = server
         self.accept()
@@ -524,7 +529,7 @@ class ServerDialog(QDialog):
 class AccountDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Аккаунт MC Monitor")
+        self.setWindowTitle(tr("Аккаунт MC Monitor"))
         self.setModal(True)
         self.setMinimumWidth(340)
         self.mode: str | None = None
@@ -532,24 +537,28 @@ class AccountDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 18)
         layout.setSpacing(12)
-        layout.addWidget(QLabel("Вход: никнейм или email"))
+        layout.addWidget(QLabel(tr("Вход: никнейм или email")))
 
         self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("Никнейм или адрес электронной почты")
+        self.username_input.setPlaceholderText(
+            tr("Никнейм или адрес электронной почты")
+        )
         self.username_input.setMaxLength(254)
         layout.addWidget(self.username_input)
 
         self.password_input = QLineEdit()
-        self.password_input.setPlaceholderText("Пароль (от 8 символов)")
+        self.password_input.setPlaceholderText(tr("Пароль (от 8 символов)"))
         self.password_input.setEchoMode(QLineEdit.Password)
         layout.addWidget(self.password_input)
 
         self.email_input = QLineEdit()
-        self.email_input.setPlaceholderText("Email для нового аккаунта")
+        self.email_input.setPlaceholderText(tr("Email для нового аккаунта"))
         self.email_input.setMaxLength(254)
         layout.addWidget(self.email_input)
 
-        note = QLabel("Новый аккаунт подтверждается одноразовым кодом из письма.")
+        note = QLabel(
+            tr("Новый аккаунт подтверждается одноразовым кодом из письма.")
+        )
         note.setStyleSheet("color: #9db1a7; font-size: 11px;")
         layout.addWidget(note)
 
@@ -559,14 +568,14 @@ class AccountDialog(QDialog):
         layout.addWidget(self.error_label)
 
         buttons = QHBoxLayout()
-        register = _button("Создать аккаунт", "quietButton")
+        register = _button(tr("Создать аккаунт"), "quietButton")
         register.clicked.connect(lambda: self._submit("signup"))
         buttons.addWidget(register)
-        login = _button("Войти", "primaryButton")
+        login = _button(tr("Войти"), "primaryButton")
         login.clicked.connect(lambda: self._submit("login"))
         buttons.addWidget(login)
         layout.addLayout(buttons)
-        cancel = _button("Отмена", "quietButton")
+        cancel = _button(tr("Отмена"), "quietButton")
         cancel.clicked.connect(self.reject)
         layout.addWidget(cancel)
         self.password_input.returnPressed.connect(lambda: self._submit("login"))
@@ -576,7 +585,7 @@ class AccountDialog(QDialog):
             try:
                 cloud_sync.validate_email(self.email_input.text())
             except cloud_sync.CloudError as exc:
-                self.error_label.setText(str(exc))
+                self.error_label.setText(tr(str(exc)))
                 return
             self.mode = "request_signup_code"
         else:
@@ -585,7 +594,7 @@ class AccountDialog(QDialog):
                     self.username_input.text(), self.password_input.text()
                 )
             except cloud_sync.CloudError as exc:
-                self.error_label.setText(str(exc))
+                self.error_label.setText(tr(str(exc)))
                 return
             self.mode = mode
         self.accept()
@@ -594,7 +603,7 @@ class AccountDialog(QDialog):
 class EmailSignupDialog(QDialog):
     def __init__(self, email: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Подтверждение email")
+        self.setWindowTitle(tr("Подтверждение email"))
         self.setModal(True)
         self.setMinimumWidth(360)
         self.email = email
@@ -602,21 +611,21 @@ class EmailSignupDialog(QDialog):
         layout.setContentsMargins(22, 20, 22, 18)
         layout.setSpacing(10)
 
-        layout.addWidget(QLabel("Код отправлен на " + email))
+        layout.addWidget(QLabel(tr("Код отправлен на ") + email))
         self.code_input = QLineEdit()
-        self.code_input.setPlaceholderText("Код из письма")
+        self.code_input.setPlaceholderText(tr("Код из письма"))
         self.code_input.setMaxLength(10)
         layout.addWidget(self.code_input)
         self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("Никнейм (3–16 символов)")
+        self.username_input.setPlaceholderText(tr("Никнейм (3–16 символов)"))
         self.username_input.setMaxLength(16)
         layout.addWidget(self.username_input)
         self.password_input = QLineEdit()
-        self.password_input.setPlaceholderText("Пароль (от 8 символов)")
+        self.password_input.setPlaceholderText(tr("Пароль (от 8 символов)"))
         self.password_input.setEchoMode(QLineEdit.Password)
         layout.addWidget(self.password_input)
         self.confirm_password_input = QLineEdit()
-        self.confirm_password_input.setPlaceholderText("Повтори пароль")
+        self.confirm_password_input.setPlaceholderText(tr("Повтори пароль"))
         self.confirm_password_input.setEchoMode(QLineEdit.Password)
         layout.addWidget(self.confirm_password_input)
         self.error_label = QLabel()
@@ -625,10 +634,10 @@ class EmailSignupDialog(QDialog):
         layout.addWidget(self.error_label)
 
         actions = QHBoxLayout()
-        cancel = _button("Отмена", "quietButton")
+        cancel = _button(tr("Отмена"), "quietButton")
         cancel.clicked.connect(self.reject)
         actions.addWidget(cancel)
-        create = _button("Подтвердить и создать", "primaryButton")
+        create = _button(tr("Подтвердить и создать"), "primaryButton")
         create.clicked.connect(self._submit)
         actions.addWidget(create)
         layout.addLayout(actions)
@@ -637,12 +646,12 @@ class EmailSignupDialog(QDialog):
         username = self.username_input.text().strip()
         password = self.password_input.text()
         if password != self.confirm_password_input.text():
-            self.error_label.setText("Пароли не совпадают.")
+            self.error_label.setText(tr("Пароли не совпадают."))
             return
         try:
             cloud_sync.validate_credentials(username, password)
         except cloud_sync.CloudError as exc:
-            self.error_label.setText(str(exc))
+            self.error_label.setText(tr(str(exc)))
             return
         self.accept()
 
@@ -662,7 +671,7 @@ class ProfileDialog(QDialog):
         servers: list[ServerConfig] | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Мой профиль")
+        self.setWindowTitle(tr("Мой профиль"))
         self.setModal(False)
         self.setMinimumWidth(390)
         self.avatar_bytes: bytes | None = None
@@ -682,7 +691,7 @@ class ProfileDialog(QDialog):
             "border-radius: 36px; font-size: 20px; font-weight: 900;"
         )
         layout.addWidget(self.avatar_preview, 0, Qt.AlignHCenter)
-        avatar_button = _button("Выбрать JPEG-аватар", "quietButton")
+        avatar_button = _button(tr("Выбрать JPEG-аватар"), "quietButton")
         avatar_button.clicked.connect(self._choose_avatar)
         layout.addWidget(avatar_button)
 
@@ -690,45 +699,49 @@ class ProfileDialog(QDialog):
         form.setSpacing(10)
         self.display_name = QLineEdit()
         self.display_name.setMaxLength(32)
-        self.display_name.setPlaceholderText("Как тебя показывать")
+        self.display_name.setPlaceholderText(tr("Как тебя показывать"))
         self.bio = QTextEdit()
-        self.bio.setPlaceholderText("Коротко о себе")
+        self.bio.setPlaceholderText(tr("Коротко о себе"))
         self.bio.setMaximumHeight(90)
-        self.share_servers = QCheckBox("Публично показывать адреса моих серверов")
-        self.share_followers = QCheckBox("Показывать подписчиков")
-        self.share_friends = QCheckBox("Показывать друзей")
-        self.share_subscriptions = QCheckBox("Показывать подписки на пользователей")
-        form.addRow("Имя", self.display_name)
-        form.addRow("О себе", self.bio)
+        self.share_servers = QCheckBox(
+            tr("Публично показывать адреса моих серверов")
+        )
+        self.share_followers = QCheckBox(tr("Показывать подписчиков"))
+        self.share_friends = QCheckBox(tr("Показывать друзей"))
+        self.share_subscriptions = QCheckBox(
+            tr("Показывать подписки на пользователей")
+        )
+        form.addRow(tr("Имя"), self.display_name)
+        form.addRow(tr("О себе"), self.bio)
         form.addRow("", self.share_servers)
         form.addRow("", self.share_followers)
         form.addRow("", self.share_friends)
         form.addRow("", self.share_subscriptions)
         layout.addLayout(form)
         privacy_note = QLabel(
-            "Каждый список скрыт по умолчанию. Включай только те данные, "
-            "которые хочешь показывать другим пользователям."
+            tr("Каждый список скрыт по умолчанию. Включай только те данные, "
+               "которые хочешь показывать другим пользователям.")
         )
         privacy_note.setWordWrap(True)
         privacy_note.setStyleSheet("color: #9db1a7; font-size: 11px;")
         layout.addWidget(privacy_note)
 
-        self.social_summary = QLabel("Подписчики · Подписки · Друзья")
+        self.social_summary = QLabel(tr("Подписчики · Подписки · Друзья"))
         self.social_summary.setStyleSheet("font-weight: 700;")
         layout.addWidget(self.social_summary)
         self.relationship_tabs = QTabWidget()
         self.relationship_lists: dict[str, QVBoxLayout] = {}
         self.relationship_tabs.setMaximumHeight(150)
         for key, title in (
-            ("followers", "Подписчики"),
-            ("subscriptions", "Подписки"),
-            ("friends", "Друзья"),
-            ("servers", "Серверы"),
+            ("followers", tr("Подписчики")),
+            ("subscriptions", tr("Подписки")),
+            ("friends", tr("Друзья")),
+            ("servers", tr("Серверы")),
         ):
             content = QWidget()
             content_layout = QVBoxLayout(content)
             content_layout.setContentsMargins(8, 6, 8, 6)
-            content_layout.addWidget(QLabel("Загружаю…"))
+            content_layout.addWidget(QLabel(tr("Загружаю…")))
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QFrame.NoFrame)
@@ -743,20 +756,20 @@ class ProfileDialog(QDialog):
                     label += f"  ·  {server.group_id}"
                 server_layout.addWidget(QLabel(label))
         else:
-            server_layout.addWidget(QLabel("Список серверов пуст."))
+            server_layout.addWidget(QLabel(tr("Список серверов пуст.")))
         server_layout.addStretch(1)
         layout.addWidget(self.relationship_tabs)
 
-        self.status = QLabel("Загружаю профиль…")
+        self.status = QLabel(tr("Загружаю профиль…"))
         self.status.setWordWrap(True)
         self.status.setStyleSheet("color: #9db1a7;")
         layout.addWidget(self.status)
 
         buttons = QHBoxLayout()
-        save = _button("Сохранить", "primaryButton")
+        save = _button(tr("Сохранить"), "primaryButton")
         save.clicked.connect(self.saveRequested.emit)
         buttons.addWidget(save)
-        close = _button("Закрыть", "quietButton")
+        close = _button(tr("Закрыть"), "quietButton")
         close.clicked.connect(self.reject)
         buttons.addWidget(close)
         layout.addLayout(buttons)
@@ -776,11 +789,18 @@ class ProfileDialog(QDialog):
         self.share_friends.setChecked(profile.share_friends)
         self.share_subscriptions.setChecked(profile.share_subscriptions)
         if summary is not None:
-            self.social_summary.setText(
-                f"{summary.followers_count} подписчиков  ·  "
-                f"{summary.subscriptions_count} подписок  ·  "
-                f"{summary.friends_count} друзей"
-            )
+            if current_language() == "en":
+                self.social_summary.setText(
+                    f"{summary.followers_count} followers  ·  "
+                    f"{summary.subscriptions_count} following  ·  "
+                    f"{summary.friends_count} friends"
+                )
+            else:
+                self.social_summary.setText(
+                    f"{summary.followers_count} подписчиков  ·  "
+                    f"{summary.subscriptions_count} подписок  ·  "
+                    f"{summary.friends_count} друзей"
+                )
         if relationships is not None:
             for key, profiles in relationships.items():
                 layout = self.relationship_lists[key]
@@ -796,10 +816,10 @@ class ProfileDialog(QDialog):
                             else f"@{person.username}"
                         )
                         if key == "friends":
-                            identity += "  ·  Друг"
+                            identity += "  ·  " + tr("Друг")
                         layout.addWidget(QLabel(identity))
                 else:
-                    layout.addWidget(QLabel("Пока пусто"))
+                    layout.addWidget(QLabel(tr("Пока пусто.")))
                 layout.addStretch(1)
         if avatar_bytes:
             pixmap = QPixmap()
@@ -811,18 +831,20 @@ class ProfileDialog(QDialog):
             self.avatar_preview.setPixmap(QPixmap())
             self.avatar_preview.setText("MM")
         self.status.setText(
-            "Аватар установлен." if profile.avatar_path else "Аватар не установлен."
+            tr("Аватар установлен.")
+            if profile.avatar_path else tr("Аватар не установлен.")
         )
 
     def _choose_avatar(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
-            self, "Выбрать аватар", "", "Изображения (*.png *.jpg *.jpeg *.webp)"
+            self, tr("Выбрать аватар"), "",
+            tr("Изображения (*.png *.jpg *.jpeg *.webp)")
         )
         if not filename:
             return
         image = QImage(filename)
         if image.isNull():
-            self.status.setText("Не удалось открыть выбранное изображение.")
+            self.status.setText(tr("Не удалось открыть выбранное изображение."))
             return
         side = min(image.width(), image.height())
         image = image.copy((image.width() - side) // 2, (image.height() - side) // 2, side, side)
@@ -831,18 +853,18 @@ class ProfileDialog(QDialog):
         buffer.open(QIODevice.WriteOnly)
         if not image.save(buffer, "JPEG", 86):
             buffer.close()
-            self.status.setText("Не удалось преобразовать изображение в JPEG.")
+            self.status.setText(tr("Не удалось преобразовать изображение в JPEG."))
             return
         data = bytes(buffer.data())
         buffer.close()
         if len(data) > 2 * 1024 * 1024:
-            self.status.setText("После сжатия аватар превышает 2 МБ.")
+            self.status.setText(tr("После сжатия аватар превышает 2 МБ."))
             return
         self.avatar_bytes = data
         self.avatar_preview.setPixmap(
             QPixmap.fromImage(image).scaled(72, 72, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         )
-        self.status.setText("Аватар готов к загрузке.")
+        self.status.setText(tr("Аватар готов к загрузке."))
 
 
 class CommunityDialog(QDialog):
@@ -861,7 +883,7 @@ class CommunityDialog(QDialog):
         initial_query: str = "",
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Сообщество MC Monitor")
+        self.setWindowTitle(tr("Сообщество MC Monitor"))
         self.setModal(True)
         self.setMinimumSize(500, 450)
         self._closed = False
@@ -871,14 +893,16 @@ class CommunityDialog(QDialog):
         self.avatarLoaded.connect(self._set_avatar)
 
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Ник, имя или адрес сервера (от 2 символов)")
+        self.search.setPlaceholderText(
+            tr("Ник, имя или адрес сервера (от 2 символов)")
+        )
         self.search.textChanged.connect(self._search_changed)
         layout.addWidget(self.search)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(QWidget(), "Игроки")
-        self.tabs.addTab(QWidget(), "Серверы")
-        self.tabs.addTab(QWidget(), "Подписки")
+        self.tabs.addTab(QWidget(), tr("Игроки"))
+        self.tabs.addTab(QWidget(), tr("Серверы"))
+        self.tabs.addTab(QWidget(), tr("Подписки"))
         self.tabs.currentChanged.connect(self._tab_changed)
         layout.addWidget(self.tabs)
 
@@ -891,7 +915,7 @@ class CommunityDialog(QDialog):
         self.scroll.setWidget(self.results)
         layout.addWidget(self.scroll, 1)
 
-        close = _button("Закрыть", "quietButton")
+        close = _button(tr("Закрыть"), "quietButton")
         close.clicked.connect(self.reject)
         layout.addWidget(close)
         self.query = ""
@@ -901,7 +925,7 @@ class CommunityDialog(QDialog):
             self.tabs.setCurrentIndex(initial_mode)
             self.search.setText(initial_query)
         else:
-            self.set_status("Введи не менее двух символов для поиска.")
+            self.set_status(tr("Введи не менее двух символов для поиска."))
 
     @property
     def mode(self) -> int:
@@ -919,11 +943,11 @@ class CommunityDialog(QDialog):
         elif self.search.text().strip():
             self.lookupRequested.emit(mode, self.search.text().strip())
         else:
-            self.set_status("Введи не менее двух символов для поиска.")
+            self.set_status(tr("Введи не менее двух символов для поиска."))
 
     def set_status(self, text: str) -> None:
         self._clear()
-        label = QLabel(text)
+        label = QLabel(tr(text))
         label.setWordWrap(True)
         label.setStyleSheet("color: #9db1a7; padding: 8px;")
         self.results_layout.addWidget(label)
@@ -934,7 +958,10 @@ class CommunityDialog(QDialog):
     ) -> None:
         self._clear()
         if not profiles:
-            self.set_status("Ты пока ни на кого не подписан." if followed else "Ничего не найдено.")
+            self.set_status(
+                tr("Ты пока ни на кого не подписан.")
+                if followed else tr("Ничего не найдено.")
+            )
             return
         for profile in profiles:
             row = QFrame()
@@ -972,7 +999,8 @@ class CommunityDialog(QDialog):
                 row_layout.addWidget(description)
             actions = QHBoxLayout()
             follow = _button(
-                "Отписаться" if profile.is_following else "Подписаться", "quietButton"
+                tr("Отписаться") if profile.is_following else tr("Подписаться"),
+                "quietButton",
             )
             follow.clicked.connect(
                 lambda _checked=False, p=profile: self.followRequested.emit(
@@ -980,13 +1008,13 @@ class CommunityDialog(QDialog):
                 )
             )
             actions.addWidget(follow)
-            open_profile = _button("Профиль", "quietButton")
+            open_profile = _button(tr("Профиль"), "quietButton")
             open_profile.clicked.connect(
                 lambda _checked=False, p=profile: self.profileRequested.emit(p)
             )
             actions.addWidget(open_profile)
             if profile.share_servers:
-                servers = _button("Серверы", "quietButton")
+                servers = _button(tr("Серверы"), "quietButton")
                 servers.clicked.connect(
                     lambda _checked=False, p=profile: self.serversRequested.emit(p)
                 )
@@ -1031,7 +1059,7 @@ class CommunityDialog(QDialog):
     def set_servers(self, servers: list[cloud_sync.PublicServer]) -> None:
         self._clear()
         if not servers:
-            self.set_status("Публичных серверов не найдено.")
+            self.set_status(tr("Публичных серверов не найдено."))
             return
         for server in servers:
             row = QFrame()
@@ -1043,7 +1071,7 @@ class CommunityDialog(QDialog):
             )
             details.setWordWrap(True)
             row_layout.addWidget(details, 1)
-            add = _button("Добавить", "quietButton")
+            add = _button(tr("Добавить"), "quietButton")
             add.clicked.connect(
                 lambda _checked=False, item=server: self.addServerRequested.emit(item)
             )
@@ -1068,7 +1096,7 @@ class ServerCatalogDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Топ серверов")
+        self.setWindowTitle(tr("Топ серверов"))
         self.setMinimumSize(500, 480)
         self.resize(560, 600)
 
@@ -1078,19 +1106,19 @@ class ServerCatalogDialog(QDialog):
 
         filters = QHBoxLayout()
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Название или адрес сервера")
+        self.search.setPlaceholderText(tr("Название или адрес сервера"))
         self.search.textChanged.connect(self._request_lookup)
         filters.addWidget(self.search, 1)
         self.sort = QComboBox()
-        self.sort.addItem("По голосам", "votes")
-        self.sort.addItem("По подписчикам", "subscribers")
-        self.sort.addItem("По онлайну", "online")
-        self.sort.addItem("Сначала новые", "newest")
+        self.sort.addItem(tr("По голосам"), "votes")
+        self.sort.addItem(tr("По подписчикам"), "subscribers")
+        self.sort.addItem(tr("По онлайну"), "online")
+        self.sort.addItem(tr("Сначала новые"), "newest")
         self.sort.currentIndexChanged.connect(self._request_lookup)
         filters.addWidget(self.sort)
         layout.addLayout(filters)
 
-        self.status = QLabel("Загружаю каталог…")
+        self.status = QLabel(tr("Загружаю каталог…"))
         self.status.setWordWrap(True)
         self.status.setStyleSheet("color: #9db1a7;")
         layout.addWidget(self.status)
@@ -1105,10 +1133,10 @@ class ServerCatalogDialog(QDialog):
         layout.addWidget(scroll, 1)
 
         actions = QHBoxLayout()
-        add = _button("Добавить сервер", "primaryButton")
+        add = _button(tr("Добавить сервер"), "primaryButton")
         add.clicked.connect(self.addRequested.emit)
         actions.addWidget(add)
-        close = _button("Закрыть", "quietButton")
+        close = _button(tr("Закрыть"), "quietButton")
         close.clicked.connect(self.reject)
         actions.addWidget(close)
         layout.addLayout(actions)
@@ -1125,7 +1153,9 @@ class ServerCatalogDialog(QDialog):
     def set_servers(self, servers: list[cloud_sync.CatalogServer]) -> None:
         self._clear()
         self.status.setText(
-            f"{len(servers)} серверов" if servers else "Каталог пока пуст."
+            (f"{len(servers)} servers" if current_language() == "en"
+             else f"{len(servers)} серверов")
+            if servers else tr("Каталог пока пуст.")
         )
         for server in servers:
             row = QFrame()
@@ -1153,19 +1183,20 @@ class ServerCatalogDialog(QDialog):
             header.addWidget(heading, 1)
             row_layout.addLayout(header)
             online = (
-                f"{server.online_count} онлайн"
-                if server.online_count >= 0 else "онлайн —"
+                (f"{server.online_count} online" if current_language() == "en"
+                 else f"{server.online_count} онлайн")
+                if server.online_count >= 0 else tr("онлайн —")
             )
             detail = QLabel(
                 f"{server.address} · {server.protocol.upper()} · {online} · "
-                f"{server.votes} голосов · "
-                f"{server.subscribers} подписчиков"
+                f"{server.votes} {tr('голосов')} · "
+                f"{server.subscribers} {tr('подписчиков')}"
             )
             detail.setWordWrap(True)
             detail.setStyleSheet("color: #9db1a7;")
             row_layout.addWidget(detail)
             if server.version:
-                version = QLabel("Версия: " + server.version)
+                version = QLabel(tr("Версия: ") + server.version)
                 version.setTextFormat(Qt.PlainText)
                 version.setStyleSheet("color: #9db1a7;")
                 row_layout.addWidget(version)
@@ -1177,20 +1208,20 @@ class ServerCatalogDialog(QDialog):
                 motd.setStyleSheet("color: #aab8b1;")
                 row_layout.addWidget(motd)
             buttons = QHBoxLayout()
-            details = _button("О сервере", "quietButton")
+            details = _button(tr("О сервере"), "quietButton")
             details.clicked.connect(
                 lambda _checked=False, item=server:
                     self.historyRequested.emit(item)
             )
             buttons.addWidget(details)
-            add_to_list = _button("Добавить себе", "quietButton")
+            add_to_list = _button(tr("Добавить себе"), "quietButton")
             add_to_list.clicked.connect(
                 lambda _checked=False, item=server:
                     self.addToListRequested.emit(item)
             )
             buttons.addWidget(add_to_list)
             vote = _button(
-                "Голос учтён" if server.has_voted_today else "Голосовать",
+                tr("Голос учтён") if server.has_voted_today else tr("Голосовать"),
                 "quietButton",
             )
             vote.setEnabled(not server.has_voted_today)
@@ -1301,7 +1332,7 @@ class ServerCatalogHistoryDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("О сервере")
+        self.setWindowTitle(tr("О сервере"))
         self.setMinimumSize(420, 360)
         self.resize(500, 430)
         layout = QVBoxLayout(self)
@@ -1311,12 +1342,13 @@ class ServerCatalogHistoryDialog(QDialog):
         layout.addWidget(heading)
         summary = QLabel(
             f"{server.address} · {server.protocol.upper()} · "
-            f"{server.votes} голосов · {server.subscribers} подписчиков"
+            f"{server.votes} {tr('голосов')} · "
+            f"{server.subscribers} {tr('подписчиков')}"
         )
         summary.setTextFormat(Qt.PlainText)
         layout.addWidget(summary)
         if server.version:
-            version = QLabel("Версия: " + server.version)
+            version = QLabel(tr("Версия: ") + server.version)
             version.setTextFormat(Qt.PlainText)
             layout.addWidget(version)
         if server.motd:
@@ -1324,7 +1356,7 @@ class ServerCatalogHistoryDialog(QDialog):
             motd.setTextFormat(Qt.PlainText)
             motd.setWordWrap(True)
             layout.addWidget(motd)
-        self.status = QLabel("Загружаю историю онлайна…")
+        self.status = QLabel(tr("Загружаю историю онлайна…"))
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.chart = ServerCatalogHistoryChart()
@@ -1333,7 +1365,7 @@ class ServerCatalogHistoryDialog(QDialog):
         self.sample_detail = QLabel()
         self.sample_detail.setWordWrap(True)
         layout.addWidget(self.sample_detail)
-        close = _button("Закрыть", "quietButton")
+        close = _button(tr("Закрыть"), "quietButton")
         close.clicked.connect(self.accept)
         layout.addWidget(close)
 
@@ -1341,7 +1373,8 @@ class ServerCatalogHistoryDialog(QDialog):
         self, samples: list[cloud_sync.CatalogHistorySample]
     ) -> None:
         self.status.setText(
-            "История за последние 30 дней" if samples else "Истории онлайна пока нет."
+            tr("История за последние 30 дней")
+            if samples else tr("Истории онлайна пока нет.")
         )
         self.chart.set_samples(samples)
 
@@ -1352,7 +1385,7 @@ class ServerCatalogHistoryDialog(QDialog):
         if index < 0 or index >= len(self.chart.samples):
             return
         sample = self.chart.samples[index]
-        names = ", ".join(sample.players) or "Список игроков недоступен."
+        names = ", ".join(sample.players) or tr("Список игроков недоступен.")
         self.sample_detail.setText(
             f"{sample.sampled_at} · {sample.online_count}/{sample.max_count} онлайн\n{names}"
         )
@@ -1373,7 +1406,7 @@ class PublicProfileDialog(QDialog):
         super().__init__(parent)
         self.profile = profile
         self.own_profile = own_profile
-        self.setWindowTitle("Профиль @" + profile.username)
+        self.setWindowTitle(tr("Профиль") + " @" + profile.username)
         self.setModal(False)
         self.setMinimumSize(420, 470)
         self.avatarLoaded.connect(self._set_relationship_avatar)
@@ -1398,7 +1431,7 @@ class PublicProfileDialog(QDialog):
         self.bio.setAlignment(Qt.AlignCenter)
         self.bio.setStyleSheet("color: #9db1a7;")
         layout.addWidget(self.bio)
-        self.counts = QLabel("Загружаю статистику…")
+        self.counts = QLabel(tr("Загружаю статистику…"))
         self.counts.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.counts)
         self.relationship_status = QLabel()
@@ -1406,7 +1439,7 @@ class PublicProfileDialog(QDialog):
         self.relationship_status.setStyleSheet("color: #9de3b5; font-weight: 800;")
         layout.addWidget(self.relationship_status)
         self._is_following = False
-        self.follow_button = _button("Подписаться", "quietButton")
+        self.follow_button = _button(tr("Подписаться"), "quietButton")
         self.follow_button.clicked.connect(
             lambda: self.followRequested.emit(
                 profile.user_id, self._is_following
@@ -1414,7 +1447,9 @@ class PublicProfileDialog(QDialog):
         )
         self.follow_button.setVisible(not own_profile)
         layout.addWidget(self.follow_button)
-        self.edit_button = _button("Редактировать профиль", "primaryButton")
+        self.edit_button = _button(
+            tr("Редактировать профиль"), "primaryButton"
+        )
         self.edit_button.setVisible(own_profile)
         self.edit_button.clicked.connect(self.editRequested.emit)
         layout.addWidget(self.edit_button)
@@ -1422,15 +1457,15 @@ class PublicProfileDialog(QDialog):
         self.tabs = QTabWidget()
         self.relationship_lists: dict[str, QVBoxLayout] = {}
         for key, title in (
-            ("followers", "Подписчики"),
-            ("subscriptions", "Подписки"),
-            ("friends", "Друзья"),
-            ("servers", "Серверы"),
+            ("followers", tr("Подписчики")),
+            ("subscriptions", tr("Подписки")),
+            ("friends", tr("Друзья")),
+            ("servers", tr("Серверы")),
         ):
             content = QWidget()
             content_layout = QVBoxLayout(content)
             content_layout.setContentsMargins(8, 6, 8, 6)
-            content_layout.addWidget(QLabel("Загружаю…"))
+            content_layout.addWidget(QLabel(tr("Загружаю…")))
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QFrame.NoFrame)
@@ -1457,20 +1492,32 @@ class PublicProfileDialog(QDialog):
             else "@" + profile.username
         )
         self.bio.setText(profile.bio)
-        self.counts.setText("  ·  ".join((
-            (f"{summary.followers_count} подписчиков"
-             if summary.can_view_followers else "подписчики скрыты"),
-            (f"{summary.subscriptions_count} подписок"
-             if summary.can_view_subscriptions else "подписки скрыты"),
-            (f"{summary.friends_count} друзей"
-             if summary.can_view_friends else "друзья скрыты"),
-        )))
+        if current_language() == "en":
+            counts = (
+                f"{summary.followers_count} followers"
+                if summary.can_view_followers else tr("подписчики скрыты"),
+                f"{summary.subscriptions_count} following"
+                if summary.can_view_subscriptions else tr("подписки скрыты"),
+                f"{summary.friends_count} friends"
+                if summary.can_view_friends else tr("друзья скрыты"),
+            )
+        else:
+            counts = (
+                f"{summary.followers_count} подписчиков"
+                if summary.can_view_followers else "подписчики скрыты",
+                f"{summary.subscriptions_count} подписок"
+                if summary.can_view_subscriptions else "подписки скрыты",
+                f"{summary.friends_count} друзей"
+                if summary.can_view_friends else "друзья скрыты",
+            )
+        self.counts.setText("  ·  ".join(counts))
         self.relationship_status.setText(
-            "Вы друзья" if summary.is_following and summary.is_followed_by else ""
+            tr("Вы друзья")
+            if summary.is_following and summary.is_followed_by else ""
         )
         self._is_following = summary.is_following
         self.follow_button.setText(
-            "Отписаться" if self._is_following else "Подписаться"
+            tr("Отписаться") if self._is_following else tr("Подписаться")
         )
         if avatar:
             pixmap = _circular_avatar(avatar, 72)
@@ -1496,14 +1543,16 @@ class PublicProfileDialog(QDialog):
         server_layout = self.relationship_lists["servers"]
         self._clear_layout(server_layout)
         if not summary.can_view_servers:
-            server_layout.addWidget(QLabel("Список серверов скрыт владельцем профиля."))
+            server_layout.addWidget(
+                QLabel(tr("Список серверов скрыт владельцем профиля."))
+            )
         elif servers:
             for server in servers:
                 server_layout.addWidget(
                     QLabel(f"{server.name}\n{server.address} · {server.protocol.upper()}")
                 )
         else:
-            server_layout.addWidget(QLabel("Публичных серверов нет."))
+            server_layout.addWidget(QLabel(tr("Публичных серверов нет.")))
         server_layout.addStretch(1)
         self.status.setText("")
 
@@ -1516,7 +1565,9 @@ class PublicProfileDialog(QDialog):
         layout = self.relationship_lists[key]
         self._clear_layout(layout)
         if not visible:
-            layout.addWidget(QLabel("Этот список скрыт владельцем профиля."))
+            layout.addWidget(
+                QLabel(tr("Этот список скрыт владельцем профиля."))
+            )
         elif profiles:
             for profile in profiles:
                 identity = (
@@ -1525,7 +1576,7 @@ class PublicProfileDialog(QDialog):
                     else "@" + profile.username
                 )
                 if key == "friends":
-                    identity += "  ·  Друг"
+                    identity += "  ·  " + tr("Друг")
                 row = QFrame()
                 row.setObjectName("serverCard")
                 row_layout = QHBoxLayout(row)
@@ -1543,7 +1594,7 @@ class PublicProfileDialog(QDialog):
                 name = QLabel(identity)
                 name.setWordWrap(True)
                 row_layout.addWidget(name, 1)
-                open_button = _button("Открыть", "quietButton")
+                open_button = _button(tr("Открыть"), "quietButton")
                 open_button.clicked.connect(
                     lambda _checked=False, person=profile:
                         self.profileRequested.emit(person)
@@ -1557,7 +1608,7 @@ class PublicProfileDialog(QDialog):
                         daemon=True,
                     ).start()
         else:
-            layout.addWidget(QLabel("Пока пусто."))
+            layout.addWidget(QLabel(tr("Пока пусто.")))
         layout.addStretch(1)
 
     @staticmethod
@@ -1651,7 +1702,7 @@ class ServerCard(QFrame):
         )
         self.address.setTextInteractionFlags(Qt.TextSelectableByMouse)
         address_row.addWidget(self.address, 1)
-        self.status_badge = QLabel("ОЖИДАНИЕ")
+        self.status_badge = QLabel(tr("ОЖИДАНИЕ"))
         self.status_badge.setObjectName("statusBadge")
         self._set_status_badge("#e5c88c", "rgba(186, 146, 72, 36)")
         address_row.addWidget(self.status_badge)
@@ -1662,7 +1713,7 @@ class ServerCard(QFrame):
         divider.setStyleSheet("color: rgba(159, 196, 177, 42);")
         root.addWidget(divider)
 
-        self.detail = QLabel("Ожидает проверки")
+        self.detail = QLabel(tr("Ожидает проверки"))
         self.detail.setStyleSheet(
             "color: #c0d0c7; font-size: 12px; font-weight: 700;"
         )
@@ -1672,7 +1723,9 @@ class ServerCard(QFrame):
         actions = QHBoxLayout()
         actions.addStretch(1)
         widget_button = _button(
-            "Убрать из виджета" if server.show_in_widget else "Добавить в виджет",
+            tr("Убрать из виджета")
+            if server.show_in_widget
+            else tr("Добавить в виджет"),
             "widgetMembershipButton",
         )
         widget_button.clicked.connect(
@@ -1680,7 +1733,7 @@ class ServerCard(QFrame):
                 self.widgetMembershipRequested.emit(address, not included)
         )
         actions.addWidget(widget_button)
-        remove_button = _button("Удалить", "removeButton")
+        remove_button = _button(tr("Удалить"), "removeButton")
         remove_button.clicked.connect(
             lambda _checked=False, address=server.address: self.removeRequested.emit(address)
         )
@@ -1711,21 +1764,21 @@ class ServerCard(QFrame):
             self._set_server_icon("")
             self.dot.setStyleSheet("color: #d8bd83; font-size: 13px;")
             self.count.setText("—")
-            self.status_badge.setText("ПРОВЕРКА")
+            self.status_badge.setText(tr("ПРОВЕРКА"))
             self._set_status_badge("#e5c88c", "rgba(186, 146, 72, 36)")
-            self.detail.setText("Проверяю сервер…")
+            self.detail.setText(tr("Проверяю сервер…"))
             return
         if not status.online:
             self._set_server_icon(status.favicon)
             self.dot.setStyleSheet("color: #ee8f89; font-size: 13px;")
             self.count.setText("—")
-            self.status_badge.setText("ОФФЛАЙН")
+            self.status_badge.setText(tr("ОФФЛАЙН"))
             self._set_status_badge("#f0aaa3", "rgba(186, 80, 78, 40)")
-            self.detail.setText(status.error or "Сервер недоступен")
+            self.detail.setText(tr(status.error) if status.error else tr("Сервер недоступен"))
             return
         self.dot.setStyleSheet("color: #8ed8ac; font-size: 13px;")
         self._set_server_icon(status.favicon)
-        self.status_badge.setText("ОНЛАЙН")
+        self.status_badge.setText(tr("ОНЛАЙН"))
         self._set_status_badge("#a8e8bd", "rgba(85, 172, 117, 40)")
         maximum = f" / {status.max_players}" if status.max_players else ""
         self.count.setText(f"{status.online_count}{maximum}")
@@ -1740,10 +1793,12 @@ class ServerCard(QFrame):
                 names += "…"
             details.append(names)
         elif status.hides_player_list:
-            details.append("Список игроков скрыт сервером")
+            details.append(tr("Список игроков скрыт сервером"))
         elif status.online_count == 0:
-            details.append("Сейчас никого нет")
-        self.detail.setText(" · ".join(details) if details else "Сервер онлайн")
+            details.append(tr("Сейчас никого нет"))
+        self.detail.setText(
+            " · ".join(details) if details else tr("Сервер онлайн")
+        )
 
     def _set_server_icon(self, encoded: str) -> None:
         pixmap = QPixmap()
@@ -1768,7 +1823,7 @@ class ServerDragHandle(QToolButton):
         self.address = address
         self.press_position: QPoint | None = None
         self.setText("⠿")
-        self.setToolTip("Перетащить сервер для изменения порядка")
+        self.setToolTip(tr("Перетащить сервер для изменения порядка"))
         self.setAccessibleName(self.toolTip())
         self.setCursor(Qt.OpenHandCursor)
         self.setFixedSize(20, 28)
@@ -1851,10 +1906,10 @@ class MainWindow(QMainWindow):
         self.logo.setFixedHeight(50)
         layout.addWidget(self.logo)
 
-        caption = QLabel("JAVA + BEDROCK  ·  МОНИТОРИНГ СЕРВЕРОВ")
-        caption.setAlignment(Qt.AlignCenter)
-        caption.setObjectName("sectionCaption")
-        layout.addWidget(caption)
+        self.caption = QLabel(tr("JAVA + BEDROCK  ·  МОНИТОРИНГ СЕРВЕРОВ"))
+        self.caption.setAlignment(Qt.AlignCenter)
+        self.caption.setObjectName("sectionCaption")
+        layout.addWidget(self.caption)
 
         # Search, account and settings live together on a dedicated action row.
         header = QHBoxLayout()
@@ -1866,17 +1921,17 @@ class MainWindow(QMainWindow):
         self.search_button.setIconSize(QSize(21, 21))
         self.search_button.setFixedSize(40, 40)
         self.search_button.setCursor(Qt.PointingHandCursor)
-        self.search_button.setToolTip("Поиск серверов")
-        self.search_button.setAccessibleName("Поиск серверов")
+        self.search_button.setToolTip(tr("Поиск серверов"))
+        self.search_button.setAccessibleName(tr("Поиск серверов"))
         self.search_button.clicked.connect(self._toggle_search)
         header.addWidget(self.search_button)
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Поиск серверов…")
+        self.search_input.setPlaceholderText(tr("Поиск серверов…"))
         self.search_input.setMinimumWidth(120)
         self.search_input.setMaximumWidth(280)
         self.search_input.setPlaceholderText(
-            "Мои серверы · Enter — общий поиск"
+            tr("Мои серверы · Enter — общий поиск")
         )
         self.search_input.setClearButtonEnabled(True)
         self.search_input.setVisible(False)
@@ -1893,8 +1948,8 @@ class MainWindow(QMainWindow):
         self.account_button.setCursor(Qt.PointingHandCursor)
         self.account_button.setIcon(_action_icon("account"))
         self.account_button.setIconSize(QSize(21, 21))
-        self.account_button.setToolTip("Аккаунт")
-        self.account_button.setAccessibleName("Аккаунт")
+        self.account_button.setToolTip(tr("Аккаунт"))
+        self.account_button.setAccessibleName(tr("Аккаунт"))
         self.account_button.clicked.connect(self._account_clicked)
         header.addWidget(self.account_button)
 
@@ -1903,8 +1958,8 @@ class MainWindow(QMainWindow):
         self.settings_button.setIcon(_action_icon("settings"))
         self.settings_button.setIconSize(QSize(21, 21))
         self.settings_button.setFixedSize(40, 40)
-        self.settings_button.setToolTip("Настройки")
-        self.settings_button.setAccessibleName("Настройки")
+        self.settings_button.setToolTip(tr("Настройки"))
+        self.settings_button.setAccessibleName(tr("Настройки"))
         self.settings_button.setCursor(Qt.PointingHandCursor)
         self.settings_button.clicked.connect(self._open_settings)
         self.catalog_button = QToolButton()
@@ -1912,8 +1967,8 @@ class MainWindow(QMainWindow):
         self.catalog_button.setText("TOP")
         self.catalog_button.setFixedSize(44, 40)
         self.catalog_button.setCursor(Qt.PointingHandCursor)
-        self.catalog_button.setToolTip("Топ серверов")
-        self.catalog_button.setAccessibleName("Топ серверов")
+        self.catalog_button.setToolTip(tr("Топ серверов"))
+        self.catalog_button.setAccessibleName(tr("Топ серверов"))
         self.catalog_button.clicked.connect(self._open_server_catalog)
         header.addWidget(self.catalog_button)
         header.addWidget(self.settings_button)
@@ -1927,36 +1982,36 @@ class MainWindow(QMainWindow):
         summary_layout.setSpacing(9)
         summary_text = QVBoxLayout()
         summary_text.setSpacing(2)
-        summary_title = QLabel("МОИ СЕРВЕРЫ")
-        summary_title.setStyleSheet(
+        self.summary_title = QLabel(tr("МОИ СЕРВЕРЫ"))
+        self.summary_title.setStyleSheet(
             "color: #e2efe7; font-size: 12px; font-weight: 900; letter-spacing: 0.6px;"
         )
-        summary_text.addWidget(summary_title)
+        summary_text.addWidget(self.summary_title)
         self.summary_label = QLabel()
         self.summary_label.setObjectName("serverCount")
         summary_text.addWidget(self.summary_label)
         summary_layout.addLayout(summary_text, 1)
-        self.online_badge = QLabel("● 0 В СЕТИ")
+        self.online_badge = QLabel(tr("● 0 В СЕТИ"))
         self.online_badge.setObjectName("onlineBadge")
         self.online_badge.setAlignment(Qt.AlignCenter)
         summary_layout.addWidget(self.online_badge)
-        refresh_button = QToolButton()
-        refresh_button.setObjectName("settingsButton")
-        refresh_button.setIcon(_action_icon("refresh"))
-        refresh_button.setIconSize(QSize(19, 19))
-        refresh_button.setFixedSize(38, 36)
-        refresh_button.setCursor(Qt.PointingHandCursor)
-        refresh_button.setToolTip("Обновить все серверы")
-        refresh_button.setAccessibleName("Обновить все серверы")
-        refresh_button.clicked.connect(self.controller.request_refresh)
-        summary_layout.addWidget(refresh_button)
+        self.refresh_button = QToolButton()
+        self.refresh_button.setObjectName("settingsButton")
+        self.refresh_button.setIcon(_action_icon("refresh"))
+        self.refresh_button.setIconSize(QSize(19, 19))
+        self.refresh_button.setFixedSize(38, 36)
+        self.refresh_button.setCursor(Qt.PointingHandCursor)
+        self.refresh_button.setToolTip(tr("Обновить все серверы"))
+        self.refresh_button.setAccessibleName(tr("Обновить все серверы"))
+        self.refresh_button.clicked.connect(self.controller.request_refresh)
+        summary_layout.addWidget(self.refresh_button)
         self.sort_button = QToolButton()
         self.sort_button.setObjectName("settingsButton")
         self.sort_button.setText("⇅")
         self.sort_button.setFixedSize(38, 36)
         self.sort_button.setCursor(Qt.PointingHandCursor)
-        self.sort_button.setToolTip("Сортировка серверов")
-        self.sort_button.setAccessibleName("Сортировка серверов")
+        self.sort_button.setToolTip(tr("Сортировка серверов"))
+        self.sort_button.setAccessibleName(tr("Сортировка серверов"))
         self.sort_button.clicked.connect(self._show_sort_menu)
         summary_layout.addWidget(self.sort_button)
         layout.addWidget(summary)
@@ -1979,11 +2034,11 @@ class MainWindow(QMainWindow):
         empty_layout.addWidget(empty_icon)
         empty_text = QVBoxLayout()
         empty_text.setSpacing(5)
-        self.empty_title = QLabel("Пора в игру?")
+        self.empty_title = QLabel(tr("Пора в игру?"))
         self.empty_title.setObjectName("emptyTitle")
         empty_text.addWidget(self.empty_title)
         self.empty_description = QLabel(
-            "Добавь Minecraft-сервер, чтобы\nследить за онлайном и игроками."
+            tr("Добавь Minecraft-сервер, чтобы\nследить за онлайном и игроками.")
         )
         self.empty_description.setObjectName("emptyDescription")
         self.empty_description.setWordWrap(True)
@@ -2005,23 +2060,28 @@ class MainWindow(QMainWindow):
         self.scroll.setMaximumHeight(360)
         layout.addWidget(self.scroll)
 
-        add_button = _button("+   Добавить сервер", "primaryButton")
-        add_button.clicked.connect(self._add_server)
-        layout.addWidget(add_button)
+        self.add_server_button = _button(
+            tr("+   Добавить сервер"), "primaryButton"
+        )
+        self.add_server_button.clicked.connect(self._add_server)
+        layout.addWidget(self.add_server_button)
 
         window_state = getattr(self.controller, "window_state", None)
         self.widget_toggle_button = _button(
-            "Убрать виджет" if getattr(window_state, "widget_visible", False)
-            else "Включить виджет",
+            tr("Убрать виджет")
+            if getattr(window_state, "widget_visible", False)
+            else tr("Включить виджет"),
             "quietButton",
         )
         self.widget_toggle_button.clicked.connect(self.controller.toggle_widget)
         layout.addWidget(self.widget_toggle_button)
 
-        footer = QLabel("Закрытие окна свернёт MC Monitor в системный трей")
-        footer.setAlignment(Qt.AlignCenter)
-        footer.setStyleSheet("color: #748a82; font-size: 10px;")
-        layout.addWidget(footer)
+        self.footer_label = QLabel(
+            tr("Закрытие окна свернёт MC Monitor в системный трей")
+        )
+        self.footer_label.setAlignment(Qt.AlignCenter)
+        self.footer_label.setStyleSheet("color: #748a82; font-size: 10px;")
+        layout.addWidget(self.footer_label)
 
         self._cloud_bridge = _CloudBridge(self)
         self._cloud_bridge.completed.connect(self._cloud_completed)
@@ -2043,7 +2103,7 @@ class MainWindow(QMainWindow):
         try:
             session = cloud_sync.load_session(self.controller.config_path)
         except cloud_sync.CloudError as exc:
-            QMessageBox.warning(self, "Сессия аккаунта", str(exc))
+            QMessageBox.warning(self, tr("Сессия аккаунта"), tr(str(exc)))
             return
         if session is None:
             dialog = AccountDialog(self)
@@ -2061,12 +2121,12 @@ class MainWindow(QMainWindow):
             return
 
         menu = QMenu(self)
-        menu.addAction("Мой профиль", self._open_profile)
-        menu.addAction("Поиск игроков и серверов", self._open_community)
-        menu.addAction("Мои подписки", lambda: self._open_community(followed_only=True))
+        menu.addAction(tr("Мой профиль"), self._open_profile)
+        menu.addAction(tr("Поиск игроков и серверов"), self._open_community)
+        menu.addAction(tr("Мои подписки"), lambda: self._open_community(followed_only=True))
         menu.addSeparator()
-        menu.addAction("Синхронизировать сейчас", lambda: self._start_cloud_operation("sync"))
-        menu.addAction("Выйти из аккаунта", self._logout)
+        menu.addAction(tr("Синхронизировать сейчас"), lambda: self._start_cloud_operation("sync"))
+        menu.addAction(tr("Выйти из аккаунта"), self._logout)
         menu.exec(self.account_button.mapToGlobal(
             QPoint(0, self.account_button.height())
         ))
@@ -2075,7 +2135,7 @@ class MainWindow(QMainWindow):
         try:
             session = cloud_sync.load_session(self.controller.config_path)
         except cloud_sync.CloudError as exc:
-            QMessageBox.warning(self, "Сессия аккаунта", str(exc))
+            QMessageBox.warning(self, tr("Сессия аккаунта"), tr(str(exc)))
             return
         if session is None:
             return
@@ -2088,7 +2148,7 @@ class MainWindow(QMainWindow):
         try:
             session = cloud_sync.load_session(self.controller.config_path)
         except cloud_sync.CloudError as exc:
-            QMessageBox.warning(self, "Сессия аккаунта", str(exc))
+            QMessageBox.warning(self, tr("Сессия аккаунта"), tr(str(exc)))
             return
         if session is None:
             return
@@ -2130,7 +2190,7 @@ class MainWindow(QMainWindow):
             share_subscriptions=dialog.share_subscriptions.isChecked(),
             avatar=dialog.avatar_bytes,
         )
-        dialog.status.setText("Сохраняю профиль…")
+        dialog.status.setText(tr("Сохраняю профиль…"))
 
     def _open_community(
         self,
@@ -2140,10 +2200,12 @@ class MainWindow(QMainWindow):
     ) -> None:
         try:
             if cloud_sync.load_session(self.controller.config_path) is None:
-                QMessageBox.information(self, "Сообщество", "Сначала войди в аккаунт.")
+                QMessageBox.information(
+                    self, tr("Сообщество"), tr("Сначала войди в аккаунт.")
+                )
                 return
         except cloud_sync.CloudError as exc:
-            QMessageBox.warning(self, "Сессия аккаунта", str(exc))
+            QMessageBox.warning(self, tr("Сессия аккаунта"), tr(str(exc)))
             return
         if self._community_dialog is not None:
             self._community_dialog.show()
@@ -2225,7 +2287,7 @@ class MainWindow(QMainWindow):
 
     def _show_catalog_add_form(self) -> None:
         dialog = QDialog(self)
-        dialog.setWindowTitle("Добавить сервер в каталог")
+        dialog.setWindowTitle(tr("Добавить сервер в каталог"))
         dialog.setMinimumWidth(360)
         form = QFormLayout(dialog)
         name = QLineEdit()
@@ -2235,12 +2297,14 @@ class MainWindow(QMainWindow):
         protocol = QComboBox()
         protocol.addItem("Java", "java")
         protocol.addItem("Bedrock", "bedrock")
-        form.addRow("Название", name)
-        form.addRow("Адрес", address)
-        form.addRow("Протокол", protocol)
+        form.addRow(tr("Название"), name)
+        form.addRow(tr("Адрес"), address)
+        form.addRow(tr("Протокол"), protocol)
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         )
+        buttons.button(QDialogButtonBox.Ok).setText("OK")
+        buttons.button(QDialogButtonBox.Cancel).setText(tr("Отмена"))
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         form.addRow(buttons)
@@ -2251,7 +2315,7 @@ class MainWindow(QMainWindow):
                 address.text(), name.text(), protocol=str(protocol.currentData())
             )
         except ConfigError as exc:
-            QMessageBox.warning(self, "Адрес сервера", str(exc))
+            QMessageBox.warning(self, tr("Адрес сервера"), tr(str(exc)))
             return
         self._run_catalog(
             "add",
@@ -2267,20 +2331,22 @@ class MainWindow(QMainWindow):
                 server.address, server.name or server.address, protocol=server.protocol
             )
         except ConfigError as exc:
-            QMessageBox.warning(self, "Адрес сервера", str(exc))
+            QMessageBox.warning(self, tr("Адрес сервера"), tr(str(exc)))
             return
         if any(
             item.address.casefold() == config.address.casefold()
             for item in self.controller.config.servers
         ):
-            QMessageBox.information(self, "Сервер уже добавлен", config.address)
+            QMessageBox.information(
+                self, tr("Сервер уже добавлен"), tr("Этот адрес уже есть в списке.")
+            )
             return
         self._save_config([*self.controller.config.servers, config])
 
     def _vote_for_catalog_server(self, server: cloud_sync.CatalogServer) -> None:
         if cloud_sync.load_session(self.controller.config_path) is None:
             QMessageBox.information(
-                self, "Нужен аккаунт", "Войди в аккаунт, чтобы голосовать."
+                self, tr("Нужен аккаунт"), tr("Войди в аккаунт, чтобы голосовать.")
             )
             self._account_clicked()
             return
@@ -2360,7 +2426,9 @@ class MainWindow(QMainWindow):
             )
             return
         if len(query) < 2:
-            self._community_dialog.set_status("Введи не менее двух символов для поиска.")
+            self._community_dialog.set_status(
+                tr("Введи не менее двух символов для поиска.")
+            )
             return
         QTimer.singleShot(
             300,
@@ -2388,7 +2456,7 @@ class MainWindow(QMainWindow):
                 action, dialog=dialog, query=query, request_id=request_id
             )
         else:
-            dialog.set_status("Введи не менее двух символов для поиска.")
+            dialog.set_status(tr("Введи не менее двух символов для поиска."))
 
     def _community_follow(self, user_id: str, is_following: bool) -> None:
         self._run_social(
@@ -2427,7 +2495,7 @@ class MainWindow(QMainWindow):
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
-        dialog.status.setText("Загружаю профиль…")
+        dialog.status.setText(tr("Загружаю профиль…"))
         self._run_social(
             "profile_view",
             dialog=dialog,
@@ -2438,7 +2506,7 @@ class MainWindow(QMainWindow):
         dialog = self._profile_view_dialogs.get(user_id)
         if dialog is None:
             return
-        dialog.status.setText("Обновляю подписку…")
+        dialog.status.setText(tr("Обновляю подписку…"))
         self._run_social(
             "profile_view_follow",
             dialog=dialog,
@@ -2459,11 +2527,13 @@ class MainWindow(QMainWindow):
                 server.address, server.name, protocol=server.protocol
             )
         except ConfigError as exc:
-            QMessageBox.warning(self, "Адрес сервера", str(exc))
+            QMessageBox.warning(self, tr("Адрес сервера"), tr(str(exc)))
             return
         if any(item.address.lower() == config.address.lower()
                for item in self.controller.config.servers):
-            QMessageBox.information(self, "Сервер уже добавлен", config.address)
+            QMessageBox.information(
+                self, tr("Сервер уже добавлен"), tr("Этот адрес уже есть в списке.")
+            )
             return
         self._save_config([*self.controller.config.servers, config])
 
@@ -2607,9 +2677,9 @@ class MainWindow(QMainWindow):
                 if error:
                     QMessageBox.warning(
                         self,
-                        "Общий каталог",
-                        "Сервер сохранён в приложении, но не попал в общий каталог:\n"
-                        + error,
+                        tr("Общий каталог"),
+                        tr("Сервер сохранён в приложении, но не попал в общий каталог:\n")
+                        + tr(error),
                     )
                 elif self._catalog_dialog is not None:
                     self._catalog_dialog.lookupRequested.emit(
@@ -2627,14 +2697,14 @@ class MainWindow(QMainWindow):
             elif action == "catalog_list":
                 dialog.set_servers(response["result"])
             elif action == "catalog_add":
-                dialog.set_status("Сервер добавлен в общий каталог.")
+                dialog.set_status(tr("Сервер добавлен в общий каталог."))
                 dialog.lookupRequested.emit(
                     dialog.search.text().strip(), str(dialog.sort.currentData())
                 )
             elif action == "catalog_vote":
                 dialog.set_status(
-                    "Голос учтён." if response["result"]
-                    else "Сегодня ты уже голосовал за этот сервер."
+                    tr("Голос учтён.") if response["result"]
+                    else tr("Сегодня ты уже голосовал за этот сервер.")
                 )
                 dialog.lookupRequested.emit(
                     dialog.search.text().strip(), str(dialog.sort.currentData())
@@ -2642,7 +2712,7 @@ class MainWindow(QMainWindow):
             return
         if action == "profile_view" and isinstance(dialog, PublicProfileDialog):
             if error:
-                dialog.status.setText(error)
+                dialog.status.setText(tr(error))
             else:
                 profile, avatar, summary, relationships, servers = response["result"]
                 dialog.set_profile_data(
@@ -2663,7 +2733,7 @@ class MainWindow(QMainWindow):
             return
         if action.startswith("profile_") and dialog is self._profile_dialog:
             if error:
-                dialog.status.setText(error)
+                dialog.status.setText(tr(error))
             elif action == "profile_load":
                 profile, avatar, summary, relationships = response["result"]
                 dialog.set_profile(profile, avatar, summary, relationships)
@@ -2674,7 +2744,9 @@ class MainWindow(QMainWindow):
                 self._account_avatar_cache = None
                 self._avatar_attempted_user = None
                 self._update_account_button()
-                QMessageBox.information(self, "Профиль", "Изменения сохранены.")
+                QMessageBox.information(
+                    self, tr("Профиль"), tr("Изменения сохранены.")
+                )
             return
         if dialog is not self._community_dialog:
             return
@@ -2682,7 +2754,7 @@ class MainWindow(QMainWindow):
         if request_id is not None and request_id != self._community_request_id:
             return
         if error:
-            dialog.set_status(error)
+            dialog.set_status(tr(error))
             return
         if action in {"community_profiles", "community_followed"}:
             dialog.set_profiles(
@@ -2728,17 +2800,20 @@ class MainWindow(QMainWindow):
                 except (OSError, RuntimeError, ValueError):
                     log.exception("не удалось восстановить прежнюю горячую клавишу")
             QMessageBox.critical(
-                self, "Не удалось сохранить", f"Настройки не сохранены:\n{exc}"
+                self, tr("Не удалось сохранить"),
+                tr("Настройки не сохранены:\n{error}").format(error=tr(str(exc)))
             )
             return
         self.setStyleSheet(_window_stylesheet(config.accent_color))
         self._aurora_surface.setAccentColor(QColor(config.accent_color))
         self.controller.reload_config()
+        self._retranslate_ui()
+        self.controller.tray.retranslate()
         self.controller.widget.resize_to_content()
         self.controller.widget.update()
         if hotkey_error is not None:
             self.controller.show_toast(
-                "Остальные настройки сохранены. Сочетание занято — оставил прежнее."
+                tr("Остальные настройки сохранены. Сочетание занято — оставил прежнее.")
             )
 
     def _on_search_changed(self, text: str) -> None:
@@ -2766,12 +2841,12 @@ class MainWindow(QMainWindow):
         no_servers = not self.controller.config.servers
         no_results = bool(query and not no_servers and visible_count == 0)
         self.empty_title.setText(
-            "Ничего не найдено" if no_results else "Пора в игру?"
+            tr("Ничего не найдено") if no_results else tr("Пора в игру?")
         )
         self.empty_description.setText(
-            "Нажми Enter для поиска серверов и игроков в общем каталоге."
+            tr("Нажми Enter для поиска серверов и игроков в общем каталоге.")
             if no_results
-            else "Добавь Minecraft-сервер, чтобы\nследить за онлайном и игроками."
+            else tr("Добавь Minecraft-сервер, чтобы\nследить за онлайном и игроками.")
         )
         self.empty_label.setVisible(no_servers or no_results)
         self.scroll.setVisible(not no_servers and not no_results)
@@ -2781,8 +2856,8 @@ class MainWindow(QMainWindow):
         if len(query) < 2:
             QMessageBox.information(
                 self,
-                "Поиск в каталоге",
-                "Для поиска публичных серверов и игроков введи не менее двух символов.",
+                tr("Поиск в каталоге"),
+                tr("Для поиска публичных серверов и игроков введи не менее двух символов."),
             )
             return
         self._open_community(initial_mode=1, initial_query=query)
@@ -2814,20 +2889,22 @@ class MainWindow(QMainWindow):
                     self._avatar_loading_user = session.user_id
                     self._run_social("header_avatar", user_id=session.user_id)
         self.account_button.setToolTip(
-            "Аккаунт: " + session.username
+            tr("Аккаунт: {username}").format(username=session.username)
             if session
-            else "Войти или создать аккаунт"
+            else tr("Войти или создать аккаунт")
         )
         self.account_button.setAccessibleName(
-            "Аккаунт " + session.username if session else "Войти в аккаунт"
+            tr("Аккаунт {username}").format(username=session.username)
+            if session else tr("Войти в аккаунт")
         )
 
     def set_widget_visibility(self, visible: bool) -> None:
         self.widget_toggle_button.setText(
-            "Убрать виджет" if visible else "Включить виджет"
+            tr("Убрать виджет") if visible else tr("Включить виджет")
         )
         self.widget_toggle_button.setToolTip(
-            "Скрыть плавающий виджет" if visible else "Показать плавающий виджет"
+            tr("Скрыть плавающий виджет")
+            if visible else tr("Показать плавающий виджет")
         )
 
     def _toggle_search(self) -> None:
@@ -2837,8 +2914,8 @@ class MainWindow(QMainWindow):
             self.header_spacer.hide()
             self.search_button.setIcon(QIcon())
             self.search_button.setText("×")
-            self.search_button.setToolTip("Закрыть поиск")
-            self.search_button.setAccessibleName("Закрыть поиск")
+            self.search_button.setToolTip(tr("Закрыть поиск"))
+            self.search_button.setAccessibleName(tr("Закрыть поиск"))
             self.search_input.setFocus()
             return
         self.search_input.clear()
@@ -2846,19 +2923,20 @@ class MainWindow(QMainWindow):
         self.header_spacer.show()
         self.search_button.setText("")
         self.search_button.setIcon(_action_icon("search"))
-        self.search_button.setToolTip("Поиск серверов")
-        self.search_button.setAccessibleName("Поиск серверов")
+        self.search_button.setToolTip(tr("Поиск серверов"))
+        self.search_button.setAccessibleName(tr("Поиск серверов"))
 
     def _logout(self) -> None:
         try:
             cloud_sync.clear_session(self.controller.config_path)
         except OSError as exc:
             log.exception("не удалось удалить локальную сессию")
-            QMessageBox.warning(self, "Не удалось выйти", str(exc))
+            QMessageBox.warning(self, tr("Не удалось выйти"), tr(str(exc)))
             return
         self._update_account_button()
         QMessageBox.information(
-            self, "Вы вышли", "Локальный список серверов оставлен на этом устройстве."
+            self, tr("Вы вышли"),
+            tr("Локальный список серверов оставлен на этом устройстве.")
         )
 
     def _sync_existing_account(self) -> None:
@@ -2888,7 +2966,7 @@ class MainWindow(QMainWindow):
                 if cloud_sync.load_session(self.controller.config_path) is None:
                     return
             except cloud_sync.CloudError as exc:
-                QMessageBox.warning(self, "Сессия аккаунта", str(exc))
+                QMessageBox.warning(self, tr("Сессия аккаунта"), tr(str(exc)))
                 return
         self._cloud_busy = True
         self.account_button.setEnabled(False)
@@ -2985,7 +3063,9 @@ class MainWindow(QMainWindow):
         if result.get("mode") == "request_signup_code":
             error = result.get("error")
             if error:
-                QMessageBox.warning(self, "Email подтверждения", error)
+                QMessageBox.warning(
+                    self, tr("Email подтверждения"), tr(error)
+                )
                 return
             dialog = EmailSignupDialog(result["email"], self)
             if dialog.exec() == QDialog.Accepted:
@@ -3010,9 +3090,13 @@ class MainWindow(QMainWindow):
         error = result.get("error")
         if error:
             if not result.get("silent"):
-                QMessageBox.warning(self, "Синхронизация не выполнена", error)
+                QMessageBox.warning(
+                    self, tr("Синхронизация не выполнена"), tr(error)
+                )
         elif not result.get("silent"):
-            QMessageBox.information(self, "Готово", "Список серверов синхронизирован.")
+            QMessageBox.information(
+                self, tr("Готово"), tr("Список серверов синхронизирован.")
+            )
         if self._cloud_pending:
             self._cloud_pending = False
             QTimer.singleShot(0, lambda: self._start_cloud_operation("sync", silent=True))
@@ -3094,12 +3178,15 @@ class MainWindow(QMainWindow):
             and status.online
         )
         self.summary_label.setText(
-            f"{len(servers)} {self._server_word(len(servers))}  ·  {online_count} онлайн"
+            f"{len(servers)} {self._server_word(len(servers))}  ·  "
+            f"{online_count} {tr('онлайн')}"
         )
-        self.online_badge.setText(f"● {online_count} В СЕТИ")
+        self.online_badge.setText(f"● {online_count} {tr('В СЕТИ')}")
 
     @staticmethod
     def _server_word(count: int) -> str:
+        if current_language() == "en":
+            return "server" if count == 1 else "servers"
         last_two = count % 100
         last = count % 10
         if 11 <= last_two <= 14:
@@ -3109,6 +3196,35 @@ class MainWindow(QMainWindow):
         if 2 <= last <= 4:
             return "сервера"
         return "серверов"
+
+    def _retranslate_ui(self) -> None:
+        self.setWindowTitle("MC Monitor")
+        self.caption.setText(tr("JAVA + BEDROCK  ·  МОНИТОРИНГ СЕРВЕРОВ"))
+        self.search_button.setToolTip(tr("Поиск серверов"))
+        self.search_button.setAccessibleName(tr("Поиск серверов"))
+        self.search_input.setPlaceholderText(tr("Мои серверы · Enter — общий поиск"))
+        self.account_button.setToolTip(tr("Аккаунт"))
+        self.account_button.setAccessibleName(tr("Аккаунт"))
+        self.settings_button.setToolTip(tr("Настройки"))
+        self.settings_button.setAccessibleName(tr("Настройки"))
+        self.catalog_button.setToolTip(tr("Топ серверов"))
+        self.catalog_button.setAccessibleName(tr("Топ серверов"))
+        self.summary_title.setText(tr("МОИ СЕРВЕРЫ"))
+        self.refresh_button.setToolTip(tr("Обновить все серверы"))
+        self.refresh_button.setAccessibleName(tr("Обновить все серверы"))
+        self.sort_button.setToolTip(tr("Сортировка серверов"))
+        self.sort_button.setAccessibleName(tr("Сортировка серверов"))
+        self.empty_title.setText(tr("Пора в игру?"))
+        self.empty_description.setText(
+            tr("Добавь Minecraft-сервер, чтобы\nследить за онлайном и игроками.")
+        )
+        self.add_server_button.setText(tr("+   Добавить сервер"))
+        self.set_widget_visibility(self.controller.window_state.widget_visible)
+        self.footer_label.setText(
+            tr("Закрытие окна свернёт MC Monitor в системный трей")
+        )
+        self._update_account_button()
+        self.refresh_servers()
 
     def refresh_statuses(self) -> None:
         if self.controller.config.server_sort_mode == "online":
@@ -3125,7 +3241,9 @@ class MainWindow(QMainWindow):
         candidate = dialog.server
         if any(s.address.casefold() == candidate.address.casefold()
                for s in self.controller.config.servers):
-            QMessageBox.information(self, "Сервер уже добавлен", "Этот адрес уже есть в списке.")
+            QMessageBox.information(
+                self, tr("Сервер уже добавлен"), tr("Этот адрес уже есть в списке.")
+            )
             return
         self._save_config([*self.controller.config.servers, candidate])
 
@@ -3136,13 +3254,17 @@ class MainWindow(QMainWindow):
         )
         if server is None:
             return
-        answer = QMessageBox.question(
-            self,
-            "Удалить сервер?",
-            f"Убрать «{server.name}» из списка?",
+        confirmation = QMessageBox(
+            QMessageBox.Question,
+            tr("Удалить сервер?"),
+            tr("Убрать «{name}» из списка?").format(name=server.name),
             QMessageBox.Yes | QMessageBox.Cancel,
-            QMessageBox.Cancel,
+            self,
         )
+        confirmation.button(QMessageBox.Yes).setText(tr("Да"))
+        confirmation.button(QMessageBox.Cancel).setText(tr("Отмена"))
+        confirmation.setDefaultButton(confirmation.button(QMessageBox.Cancel))
+        answer = confirmation.exec()
         if answer != QMessageBox.Yes:
             return
         servers = [
@@ -3183,7 +3305,7 @@ class MainWindow(QMainWindow):
         """)
 
         pin_action = menu.addAction(
-            "Открепить сервер" if server.pinned else "Закрепить сервер"
+            tr("Открепить сервер") if server.pinned else tr("Закрепить сервер")
         )
         pin_action.triggered.connect(
             lambda: self._set_server_pin(address, not server.pinned)
@@ -3197,27 +3319,27 @@ class MainWindow(QMainWindow):
                 item.pinned for item in group_servers
             )
             group_action = menu.addAction(
-                "Открепить группу" if group_pinned else "Закрепить группу"
+                tr("Открепить группу") if group_pinned else tr("Закрепить группу")
             )
             group_action.triggered.connect(
                 lambda: self._set_group_pin(server.group_id, not group_pinned)
             )
         menu.addSeparator()
 
-        priorities_action = menu.addAction("Приоритеты игроков…")
+        priorities_action = menu.addAction(tr("Приоритеты игроков…"))
         priorities_action.triggered.connect(lambda: self._show_priorities(server))
 
-        groups_action = menu.addAction("Добавить в группу…")
+        groups_action = menu.addAction(tr("Добавить в группу…"))
         groups_action.triggered.connect(lambda: self._show_groups(server))
 
         menu.addSeparator()
 
-        edit_action = menu.addAction("Изменить…")
+        edit_action = menu.addAction(tr("Изменить…"))
         edit_action.triggered.connect(lambda: self._edit_server(server))
 
         menu.addSeparator()
 
-        delete_action = menu.addAction("Удалить")
+        delete_action = menu.addAction(tr("Удалить"))
         delete_action.triggered.connect(lambda: self._remove_server(address))
 
         menu.exec(pos)
@@ -3266,7 +3388,9 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             log.exception("не удалось сохранить порядок серверов")
             QMessageBox.critical(
-                self, "Не удалось сохранить", f"Порядок не сохранён:\n{exc}"
+                self,
+                tr("Не удалось сохранить"),
+                tr("Порядок не сохранён:\n{error}").format(error=tr(str(exc))),
             )
             return
         self.controller.config = updated
@@ -3277,11 +3401,11 @@ class MainWindow(QMainWindow):
     def _show_sort_menu(self) -> None:
         menu = QMenu(self)
         options = (
-            ("manual", "Вручную"),
-            ("name", "По имени"),
-            ("online", "По онлайну"),
-            ("ping", "По пингу (время ответа)"),
-            ("date", "По дате добавления"),
+            ("manual", tr("Вручную")),
+            ("name", tr("По имени")),
+            ("online", tr("По онлайну")),
+            ("ping", tr("По пингу (время ответа)")),
+            ("date", tr("По дате добавления")),
         )
         for mode, title in options:
             action = menu.addAction(title)
@@ -3301,7 +3425,9 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             log.exception("не удалось сохранить сортировку серверов")
             QMessageBox.critical(
-                self, "Не удалось сохранить", f"Сортировка не сохранена:\n{exc}"
+                self,
+                tr("Не удалось сохранить"),
+                tr("Сортировка не сохранена:\n{error}").format(error=tr(str(exc))),
             )
             return
         self.controller.config = updated
@@ -3320,21 +3446,25 @@ class MainWindow(QMainWindow):
 
     def _show_priorities(self, server: ServerConfig) -> None:
         dialog = QDialog(self)
-        dialog.setWindowTitle("Приоритеты игроков — " + server.name)
+        dialog.setWindowTitle(tr("Приоритеты игроков — ") + server.name)
         dialog.setMinimumWidth(340)
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(22, 20, 22, 18)
         layout.setSpacing(12)
-        layout.addWidget(QLabel("Отслеживать вход и выход указанных игроков:"))
+        layout.addWidget(
+            QLabel(tr("Отслеживать вход и выход указанных игроков:"))
+        )
         from PySide6.QtWidgets import QTextEdit
         priorities_edit = QTextEdit()
-        priorities_edit.setPlaceholderText("Например:\nNotch\nJeb_\nDinnerbone")
+        priorities_edit.setPlaceholderText(
+            tr("Например:\nNotch\nJeb_\nDinnerbone")
+        )
         priorities_edit.setPlainText("\n".join(server.priority_players))
         priorities_edit.setMaximumHeight(100)
         layout.addWidget(priorities_edit)
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Save).setText("Сохранить")
-        buttons.button(QDialogButtonBox.Cancel).setText("Отмена")
+        buttons.button(QDialogButtonBox.Save).setText(tr("Сохранить"))
+        buttons.button(QDialogButtonBox.Cancel).setText(tr("Отмена"))
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
@@ -3349,8 +3479,8 @@ class MainWindow(QMainWindow):
                 if len(name) > 32 or any(character.isspace() for character in name):
                     QMessageBox.warning(
                         self,
-                        "Некорректный ник",
-                        "Каждый ник должен быть не длиннее 32 символов и без пробелов.",
+                        tr("Некорректный ник"),
+                        tr("Каждый ник должен быть не длиннее 32 символов и без пробелов."),
                     )
                     return
                 if name.casefold() not in seen:
@@ -3365,15 +3495,15 @@ class MainWindow(QMainWindow):
 
     def _show_groups(self, server: ServerConfig) -> None:
         dialog = QDialog(self)
-        dialog.setWindowTitle('Добавить в группу')
+        dialog.setWindowTitle(tr("Добавить в группу"))
         dialog.setMinimumWidth(340)
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(22, 20, 22, 18)
         layout.setSpacing(12)
-        layout.addWidget(QLabel('Выберите группу или создайте новую:'))
+        layout.addWidget(QLabel(tr("Выберите группу или создайте новую:")))
         from PySide6.QtWidgets import QComboBox
         group_combo = QComboBox()
-        group_combo.addItem('(без группы)', None)
+        group_combo.addItem(tr("(без группы)"), None)
         groups = list(dict.fromkeys(
             item.group_id
             for item in self.controller.config.servers
@@ -3381,14 +3511,14 @@ class MainWindow(QMainWindow):
         ))
         for group_id in groups:
             group_combo.addItem(group_id, group_id)
-        group_combo.addItem('+ Создать новую группу…', '__new__')
+        group_combo.addItem(tr("+ Создать новую группу…"), '__new__')
         if server.group_id:
             existing_index = group_combo.findData(server.group_id)
             if existing_index >= 0:
                 group_combo.setCurrentIndex(existing_index)
         layout.addWidget(group_combo)
         group_name_input = QLineEdit()
-        group_name_input.setPlaceholderText('Название новой группы')
+        group_name_input.setPlaceholderText(tr("Название новой группы"))
         group_name_input.setVisible(False)
         layout.addWidget(group_name_input)
         def on_group_changed(idx):
@@ -3396,8 +3526,8 @@ class MainWindow(QMainWindow):
             group_name_input.setVisible(show)
         group_combo.currentIndexChanged.connect(on_group_changed)
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Save).setText('Добавить')
-        buttons.button(QDialogButtonBox.Cancel).setText('Отмена')
+        buttons.button(QDialogButtonBox.Save).setText(tr("Добавить"))
+        buttons.button(QDialogButtonBox.Cancel).setText(tr("Отмена"))
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
@@ -3406,7 +3536,10 @@ class MainWindow(QMainWindow):
             if group_id == '__new__':
                 name = group_name_input.text().strip()
                 if not name or len(name) > 60:
-                    QMessageBox.warning(self, 'Группа', 'Название должно содержать от 1 до 60 символов.')
+                    QMessageBox.warning(
+                        self, tr("Группа"),
+                        tr("Название должно содержать от 1 до 60 символов.")
+                    )
                     return
                 existing = next(
                     (group for group in groups if group.casefold() == name.casefold()),
@@ -3511,7 +3644,11 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             log.exception("не удалось сохранить список серверов")
             QMessageBox.critical(
-                self, "Не удалось сохранить", f"Список серверов не сохранён:\n{exc}"
+                self,
+                tr("Не удалось сохранить"),
+                tr("Список серверов не сохранён:\n{error}").format(
+                    error=tr(str(exc))
+                ),
             )
             return
         self.controller.config = updated
@@ -3544,16 +3681,18 @@ class TrayController:
         )
         self.icon.setToolTip("MC Monitor")
         menu = QMenu()
-        menu.addAction("Открыть MC Monitor", self.show_window)
-        self.widget_action = menu.addAction("Включить виджет")
+        self.open_action = menu.addAction(tr("Открыть MC Monitor"), self.show_window)
+        self.widget_action = menu.addAction(tr("Включить виджет"))
         self.widget_action.triggered.connect(self.controller.toggle_widget)
-        menu.addAction("Обновить серверы", app_controller.request_refresh)
-        menu.addAction(
-            "Проверить обновления",
+        self.refresh_action = menu.addAction(
+            tr("Обновить серверы"), app_controller.request_refresh
+        )
+        self.update_action = menu.addAction(
+            tr("Проверить обновления"),
             lambda: check_for_updates(app_controller.main_window),
         )
         menu.addSeparator()
-        menu.addAction("Выход", app_controller.quit)
+        self.quit_action = menu.addAction(tr("Выход"), app_controller.quit)
         self.icon.setContextMenu(menu)
         self.icon.activated.connect(self._activated)
 
@@ -3573,7 +3712,16 @@ class TrayController:
 
     def set_widget_visibility(self, visible: bool) -> None:
         self.widget_action.setText(
-            "Убрать виджет" if visible else "Включить виджет"
+            tr("Убрать виджет") if visible else tr("Включить виджет")
+        )
+
+    def retranslate(self) -> None:
+        self.open_action.setText(tr("Открыть MC Monitor"))
+        self.refresh_action.setText(tr("Обновить серверы"))
+        self.update_action.setText(tr("Проверить обновления"))
+        self.quit_action.setText(tr("Выход"))
+        self.set_widget_visibility(
+            any(widget.state.widget_visible for widget in self.controller.widgets)
         )
 
     def _activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
@@ -3587,8 +3735,8 @@ class TrayController:
         if not self.available:
             QMessageBox.information(
                 self.controller.main_window,
-                "Системный трей недоступен",
-                "Окно скрыто, но Windows не сообщила о доступной области уведомлений.",
+                tr("Системный трей недоступен"),
+                tr("Окно скрыто, но Windows не сообщила о доступной области уведомлений."),
             )
 
     def show_message(self, title: str, message: str) -> bool:

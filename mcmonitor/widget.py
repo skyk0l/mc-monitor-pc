@@ -51,6 +51,7 @@ from .config import (
     resource_path,
     save_config,
 )
+from .i18n import tr
 from .models import ServerStatus
 from .notify import change_notice
 from .ui_state import WindowState, load_state, save_state
@@ -187,7 +188,7 @@ class StatusWidget(QWidget):
             "MC Monitor" if profile is None else f"MC Monitor · {profile.name}"
         )
         self.setToolTip(
-            "Клик по серверу — список игроков · Перетащи карточку · ПКМ — меню · Ctrl+колесо — прозрачность"
+            tr("Клик по серверу — список игроков · Перетащи карточку · ПКМ — меню · Ctrl+колесо — прозрачность")
         )
 
         self._hover_anim = QPropertyAnimation(self, b"hover", self)
@@ -540,7 +541,7 @@ class StatusWidget(QWidget):
         title = (
             self.profile.name
             if self.profile is not None
-            else next(iter(group_names)) if len(group_names) == 1 else "ИЗБРАННОЕ"
+            else next(iter(group_names)) if len(group_names) == 1 else tr("ИЗБРАННОЕ")
         )
         if selected or self.profile is not None:
             title_font = _font(
@@ -611,15 +612,16 @@ class StatusWidget(QWidget):
             painter.setFont(_font(13, QFont.Weight.DemiBold))
             painter.setPen(SOFT)
             message = (
-                "Нет серверов" if not self.app.config.servers else "Виджет пока пуст"
+                tr("Нет серверов") if not self.app.config.servers
+                else tr("Виджет пока пуст")
             )
             painter.drawText(QPointF(card.left() + 34, top + 24), message)
             painter.setFont(_font(10))
             painter.setPen(DIM)
             painter.drawText(
                 QPointF(card.left() + 34, top + 42),
-                "Добавь сервер в окне приложения" if not self.app.config.servers
-                else "Добавь сервер в виджет на его карточке",
+                tr("Добавь сервер в окне приложения") if not self.app.config.servers
+                else tr("Добавь сервер в виджет на его карточке"),
             )
             return
         self._player_area = QRectF()
@@ -667,11 +669,11 @@ class StatusWidget(QWidget):
         self._paint_chevron(painter, QPointF(chevron_x, row_top + 17), self.expanded == server.address)
 
         if status is None:
-            sub = "проверяю…"
+            sub = tr("проверяю…")
         elif status.online:
-            sub = status.version or "версия неизвестна"
+            sub = status.version or tr("версия неизвестна")
         else:
-            sub = "сервер не отвечает"
+            sub = tr("сервер не отвечает")
         sub_font = _font(10)
         painter.setFont(sub_font)
         painter.setPen(QColor(126, 134, 151, 215))
@@ -692,21 +694,21 @@ class StatusWidget(QWidget):
             painter.setFont(suffix_font)
             painter.setPen(QColor(126, 134, 151, 220))
             painter.drawText(QPointF(x + num_width, row_top + 27), suffix)
-            label, label_color = "онлайн", online_color
+            label, label_color = tr("онлайн"), online_color
         elif status is None:
             painter.setFont(_font(20, QFont.Weight.DemiBold))
             painter.setPen(AMBER)
             painter.drawText(
                 QRectF(right - 90, row_top + 2, 90, 28), Qt.AlignRight | Qt.AlignVCenter, "…"
             )
-            label, label_color = "проверяю", AMBER
+            label, label_color = tr("проверяю"), AMBER
         else:
             painter.setFont(_font(20, QFont.Weight.DemiBold))
             painter.setPen(QColor(120, 128, 145, 220))
             painter.drawText(
                 QRectF(right - 90, row_top + 2, 90, 28), Qt.AlignRight | Qt.AlignVCenter, "—"
             )
-            label, label_color = "офлайн", CORAL
+            label, label_color = tr("офлайн"), CORAL
 
         painter.setFont(_font(10))
         painter.setPen(label_color)
@@ -758,12 +760,12 @@ class StatusWidget(QWidget):
         header_baseline = inner.top() + PANEL_PAD + 10
         painter.setFont(_font(8, QFont.Weight.DemiBold, 1.4))
         painter.setPen(QColor(138, 147, 165, 190))
-        painter.drawText(QPointF(left, header_baseline), "ИГРОКИ")
+        painter.drawText(QPointF(left, header_baseline), tr("ИГРОКИ"))
 
         names = status.unique_players if status and status.online else []
         hint = ""
         if status is not None and status.online and status.hides_player_list:
-            hint = "список скрыт"
+            hint = tr("список скрыт")
         elif names and len(names) < (status.online_count if status else 0):
             hint = f"{len(names)} из {status.online_count}" if status else ""
         if hint:
@@ -786,13 +788,13 @@ class StatusWidget(QWidget):
 
         title = subtitle = ""
         if status is None:
-            title, subtitle = "Проверяю…", "Список появится через секунду"
+            title, subtitle = tr("Проверяю…"), tr("Список появится через секунду")
         elif not status.online:
-            title, subtitle = "Сервер сейчас офлайн", "Ники увидим, когда он оживёт"
+            title, subtitle = tr("Сервер сейчас офлайн"), tr("Ники увидим, когда он оживёт")
         elif status.hides_player_list:
-            title, subtitle = "Сервер не показывает ники", "Видно только количество игроков"
+            title, subtitle = tr("Сервер не показывает ники"), tr("Видно только количество игроков")
         elif not names:
-            title, subtitle = "Сейчас никого", "Заходи первым 🌙"
+            title, subtitle = tr("Сейчас никого"), tr("Заходи первым 🌙")
 
         if title:
             painter.setFont(_font(11, QFont.Weight.DemiBold))
@@ -864,17 +866,17 @@ class StatusWidget(QWidget):
         )
 
         if self._loading:
-            text = "обновляю…"
+            text = tr("обновляю…")
         elif self._last_update:
             age = time.time() - self._last_update
             stamp = (
-                "только что"
+                tr("только что")
                 if age < 70
                 else time.strftime("%H:%M", time.localtime(self._last_update))
             )
-            text = f"обновлено {stamp}"
+            text = tr("обновлено {time}").format(time=stamp)
         else:
-            text = "ожидаю первую проверку"
+            text = tr("ожидаю первую проверку")
 
         painter.setFont(_font(10))
         painter.setPen(QColor(110, 118, 135, 220))
@@ -1019,15 +1021,15 @@ class StatusWidget(QWidget):
         menu = QMenu(self)
         menu.setStyleSheet(MENU_QSS)
 
-        refresh = menu.addAction("Обновить сейчас")
+        refresh = menu.addAction(tr("Обновить сейчас"))
         refresh.triggered.connect(self.app.request_refresh)
-        reload_action = menu.addAction("Перечитать настройки")
+        reload_action = menu.addAction(tr("Перечитать настройки"))
         reload_action.triggered.connect(self.app.reload_config)
-        open_action = menu.addAction("Открыть servers.json")
+        open_action = menu.addAction(tr("Открыть servers.json"))
         open_action.triggered.connect(self.app.open_config)
 
         if self._widget_servers():
-            players_menu = menu.addMenu("Игроки")
+            players_menu = menu.addMenu(tr("Игроки"))
             for server in self._widget_servers():
                 action = players_menu.addAction(server.name)
                 action.setCheckable(True)
@@ -1037,18 +1039,18 @@ class StatusWidget(QWidget):
                 )
         menu.addSeparator()
 
-        top_action = menu.addAction("Всегда сверху")
+        top_action = menu.addAction(tr("Всегда сверху"))
         top_action.setCheckable(True)
         top_action.setChecked(self.state.always_on_top)
         top_action.toggled.connect(self.set_always_on_top)
 
-        opacity_menu = menu.addMenu("Прозрачность")
+        opacity_menu = menu.addMenu(tr("Прозрачность"))
         for value in (0.6, 0.75, 0.85, 0.93, 1.0):
             action = opacity_menu.addAction(f"{int(value * 100)}%")
             action.triggered.connect(lambda _checked=False, v=value: self.set_opacity(v))
 
         menu.addSeparator()
-        quit_action = menu.addAction("Выход")
+        quit_action = menu.addAction(tr("Выход"))
         quit_action.triggered.connect(self.app.quit)
         return menu
 
@@ -1189,11 +1191,13 @@ class WidgetApp:
 
     def __init__(self, config_path: Path, config: AppConfig | None = None) -> None:
         from .main_window import MainWindow, TrayController
+        from .i18n import set_language
         from PySide6.QtGui import QIcon
 
         self.config_path = config_path
         self.state_path = config_path.parent / "window.json"
         self.config = config or load_config(config_path)
+        set_language(self.config.language)
         self.window_state = load_state(self.state_path)
         self.qapp = QApplication.instance() or QApplication([])
         self.qapp.setApplicationName("MC Monitor")
@@ -1247,6 +1251,9 @@ class WidgetApp:
                     widget.move(profile.x, profile.y)
                 widget.setWindowOpacity(profile.widget_opacity)
             widget.statuses = self.statuses
+            widget.setToolTip(
+                tr("Клик по серверу — список игроков · Перетащи карточку · ПКМ — меню · Ctrl+колесо — прозрачность")
+            )
             widget.resize_to_content()
             widget.update()
             updated.append(widget)
@@ -1268,10 +1275,12 @@ class WidgetApp:
         if self._startup_hotkey_error:
             QMessageBox.warning(
                 self.main_window,
-                "Горячая клавиша недоступна",
-                f"Не удалось зарегистрировать {self.config.hotkey_show_widget}.\n"
-                f"{self._startup_hotkey_error}\n"
-                "Выберите другое сочетание клавиш в настройках.",
+                tr("Горячая клавиша недоступна"),
+                tr("Не удалось зарегистрировать {hotkey}.\n{reason}\nВыберите другое сочетание клавиш в настройках.")
+                .format(
+                    hotkey=self.config.hotkey_show_widget,
+                    reason=tr(self._startup_hotkey_error),
+                ),
             )
         self.refresh()
         QTimer.singleShot(
@@ -1378,8 +1387,13 @@ class WidgetApp:
         try:
             config = load_config(self.config_path)
         except ConfigError as exc:
-            self.show_toast(f"Ошибка в настройках: {exc}")
+            self.show_toast(
+                tr("Ошибка в настройках: {error}").format(error=tr(str(exc)))
+            )
             return
+        from .i18n import set_language
+
+        set_language(config.language)
         had_profiles = bool(self.config.widgets)
         if had_profiles and not config.widgets:
             self.window_state.widget_visible = any(

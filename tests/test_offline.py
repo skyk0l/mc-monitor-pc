@@ -27,6 +27,7 @@ from mcmonitor.config import (  # noqa: E402
 )
 from mcmonitor.icon import make_icon, save_ico  # noqa: E402
 from mcmonitor.hotkeys import _native_message_address, parse_hotkey  # noqa: E402
+from mcmonitor.i18n import set_language, tr  # noqa: E402
 from mcmonitor.models import ServerStatus  # noqa: E402
 from mcmonitor.notify import (  # noqa: E402
     change_notice,
@@ -333,10 +334,12 @@ def test_config_roundtrip() -> None:
         ])
         config.poll_interval = 30
         config.server_sort_mode = "date"
+        config.language = "en"
         save_config(path, config)
 
         again = load_config(path)
         assert again.poll_interval == 30
+        assert again.language == "en"
         assert again.servers[0].address == "localhost:25565"
         assert again.servers[0].protocol == "java"
         assert again.servers[0].show_in_widget
@@ -347,6 +350,19 @@ def test_config_roundtrip() -> None:
         assert again.servers[1].protocol == "bedrock"
         assert again.server_sort_mode == "date"
         assert again.notify_joins is True
+
+
+def test_language_setting_and_translations() -> None:
+    config = AppConfig.from_dict({"language": "en", "servers": []})
+    assert config.language == "en"
+    assert AppConfig.from_dict({"language": "unknown"}).language == "system"
+    assert AppConfig([], 20).poll_interval == 20
+    set_language(config.language)
+    assert tr("Сохранить") == "Save"
+    assert tr("Уведомления работают 👍") == "Notifications are working 👍"
+    set_language("ru")
+    assert tr("Сохранить") == "Сохранить"
+    set_language("system")
 
 
 def test_widget_profiles_roundtrip_and_validation() -> None:
@@ -1232,6 +1248,7 @@ def main() -> None:
         test_update_rejects_untrusted_asset_url,
         test_config_parse,
         test_config_roundtrip,
+        test_language_setting_and_translations,
         test_widget_profiles_roundtrip_and_validation,
         test_ping_sort_mode_is_valid_and_persistent,
         test_config_interval_floor,

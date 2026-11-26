@@ -186,6 +186,7 @@ class AppConfig:
     widget_accent_color: str = "#A7C6A4"
     widgets: list[WidgetProfile] = field(default_factory=list)
     hotkey_show_widget: str = "ctrl+shift+m"
+    language: str = "system"
 
     @classmethod
     def from_dict(cls, data: Any) -> "AppConfig":
@@ -228,8 +229,12 @@ class AppConfig:
         sort_mode = str(data.get("server_sort_mode") or "manual")
         if sort_mode not in {"manual", "name", "online", "ping", "date"}:
             sort_mode = "manual"
+        language = str(data.get("language") or "system")
+        if language not in {"system", "ru", "en"}:
+            language = "system"
         return cls(
             servers=servers,
+            language=language,
             poll_interval=max(MIN_INTERVAL, interval),
             notify_joins=bool(data.get("notify_joins", True)),
             notify_offline=bool(data.get("notify_offline", True)),
@@ -248,6 +253,7 @@ class AppConfig:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "language": self.language,
             "poll_interval": self.poll_interval,
             "notify_joins": self.notify_joins,
             "notify_offline": self.notify_offline,

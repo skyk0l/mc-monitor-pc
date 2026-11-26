@@ -14,6 +14,7 @@ from pystray import Menu, MenuItem
 from . import api
 from .config import AppConfig, ConfigError, ServerConfig, load_config
 from .icon import make_icon
+from .i18n import set_language, tr
 from .models import ServerStatus
 from .notify import change_notice
 
@@ -26,6 +27,7 @@ class TrayApp:
     def __init__(self, config_path: Path, config: AppConfig | None = None) -> None:
         self.config_path = config_path
         self.config = config or load_config(config_path)
+        set_language(self.config.language)
         self.statuses: dict[str, ServerStatus] = {}
         self._stop = threading.Event()
         self._wake = threading.Event()
@@ -40,10 +42,10 @@ class TrayApp:
     def server_line(self, server: ServerConfig) -> str:
         status = self.statuses.get(server.address)
         if status is None:
-            return f"{server.name}: проверяю…"
+            return f"{server.name}: {tr('проверяю…')}"
         if status.online:
             return f"{server.name}: {status.players_label}"
-        return f"{server.name}: офлайн"
+        return f"{server.name}: {tr('офлайн')}"
 
     def title(self) -> str:
         lines = ["MC Monitor"]
@@ -129,19 +131,23 @@ class TrayApp:
             status = self.statuses.get(server.address)
             if status and status.online and status.players:
                 names = [MenuItem(name, self._noop, enabled=False) for name in status.players[:20]]
-                items.append(MenuItem("   👥 игроки", Menu(*names)))
+                items.append(MenuItem("   👥 " + tr("Игроки"), Menu(*names)))
         if not self.config.servers:
             items.append(
-                MenuItem("Нет серверов — открой servers.json", self._noop, enabled=False)
+                MenuItem(
+                    tr("Нет серверов — открой servers.json"),
+                    self._noop,
+                    enabled=False,
+                )
             )
         items += [
             Menu.SEPARATOR,
-            MenuItem("🔄 Обновить", self._on_refresh, default=True),
-            MenuItem("📄 Открыть servers.json", self._on_open_config),
-            MenuItem("♻ Перечитать настройки", self._on_reload),
-            MenuItem("🔔 Проверить уведомления", self._on_test_notification),
+            MenuItem("🔄 " + tr("Обновить"), self._on_refresh, default=True),
+            MenuItem("📄 " + tr("Открыть servers.json"), self._on_open_config),
+            MenuItem("♻ " + tr("Перечитать настройки"), self._on_reload),
+            MenuItem("🔔 " + tr("Проверить уведомления"), self._on_test_notification),
             Menu.SEPARATOR,
-            MenuItem("❌ Выход", self._on_quit),
+            MenuItem("❌ " + tr("Выход"), self._on_quit),
         ]
         return Menu(*items)
 
@@ -160,15 +166,19 @@ class TrayApp:
     def _on_reload(self, icon: pystray.Icon, item: MenuItem) -> None:
         try:
             self.config = load_config(self.config_path)
+            set_language(self.config.language)
         except ConfigError as exc:
-            self._notify(f"Ошибка в настройках: {exc}", "MC Monitor")
+            self._notify(
+                tr("Ошибка в настройках: {error}").format(error=tr(str(exc))),
+                "MC Monitor",
+            )
             log.error("настройки не перечитаны: %s", exc)
             return
         self._redraw()
         self._wake.set()
 
     def _on_test_notification(self, icon: pystray.Icon, item: MenuItem) -> None:
-        self._notify("Уведомления работают 👍", "MC Monitor")
+        self._notify(tr("Уведомления работают 👍"), "MC Monitor")
 
     def _on_quit(self, icon: pystray.Icon, item: MenuItem) -> None:
         self._stop.set()

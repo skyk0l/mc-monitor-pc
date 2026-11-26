@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from datetime import datetime
 
 from .config import AppConfig
+from .i18n import tr
 from .models import ServerStatus
 
 TITLE = "MC Monitor"
@@ -76,9 +77,13 @@ def change_notice(
     if old is None:
         return None  # первая проверка — просто запоминаем состояние
     if old.online and not new.online and config.notify_offline:
-        return Notice(TITLE, f"🔴 {server_name} недоступен")
+        return Notice(TITLE, tr("🔴 {server} недоступен").format(server=server_name))
     if not old.online and new.online and config.notify_online:
-        return Notice(TITLE, f"🟢 {server_name} снова онлайн · {new.players_label}")
+        return Notice(
+            TITLE,
+            tr("🟢 {server} снова онлайн · {players}")
+            .format(server=server_name, players=new.players_label),
+        )
     if not (old.online and new.online):
         return None
 
@@ -88,8 +93,15 @@ def change_notice(
     if joined or left:
         parts: list[str] = []
         if joined:
-            parts.append("зашёл " + ", ".join(joined[:5]))
+            parts.append(tr("зашёл ") + ", ".join(joined[:5]))
         if left:
-            parts.append("вышел " + ", ".join(left[:5]))
-        return Notice(TITLE, f"🎯 {server_name}: {'; '.join(parts)} · {new.players_label}")
+            parts.append(tr("вышел ") + ", ".join(left[:5]))
+        return Notice(
+            TITLE,
+            tr("🎯 {server}: {changes} · {players}").format(
+                server=server_name,
+                changes="; ".join(parts),
+                players=new.players_label,
+            ),
+        )
     return None

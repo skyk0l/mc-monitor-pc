@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from .config import AppConfig, WidgetProfile, save_config
+from .i18n import tr
 
 
 class ColorChip(QFrame):
@@ -110,7 +111,7 @@ class SettingsDialog(QDialog):
 
     def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Настройки MC Monitor")
+        self.setWindowTitle(tr("Настройки MC Monitor"))
         self.setMinimumWidth(520)
         self.setMinimumHeight(620)
         self._config = config
@@ -135,9 +136,24 @@ class SettingsDialog(QDialog):
         cl = QVBoxLayout(content)
         cl.setSpacing(20)
 
+        cl.addWidget(self._section("Язык интерфейса"))
+        self.languageSelector = QComboBox()
+        for label, language in (
+            ("Системный", "system"),
+            ("Русский", "ru"),
+            ("Английский", "en"),
+        ):
+            self.languageSelector.addItem(tr(label), language)
+        language_index = self.languageSelector.findData(self._working.language)
+        self.languageSelector.setCurrentIndex(max(0, language_index))
+        cl.addWidget(self.languageSelector)
+        language_note = QLabel(tr("Язык изменится после сохранения настроек."))
+        language_note.setStyleSheet("color: #8ca99d; font-size: 11px;")
+        cl.addWidget(language_note)
+
         cl.addWidget(self._section("Внешний вид"))
 
-        self.accentLabel = QLabel("Основной цвет (акцент)")
+        self.accentLabel = QLabel(tr("Основной цвет (акцент)"))
         self.accentLabel.setStyleSheet("font-weight: 700; font-size: 13px;")
         cl.addWidget(self.accentLabel)
 
@@ -159,13 +175,13 @@ class SettingsDialog(QDialog):
         chipRow.addStretch()
         cl.addLayout(chipRow)
 
-        customBtn = QPushButton("Выбрать свой цвет…")
+        customBtn = QPushButton(tr("Выбрать свой цвет…"))
         customBtn.setCursor(Qt.PointingHandCursor)
         customBtn.clicked.connect(self._pickCustomColor)
         cl.addWidget(customBtn)
 
         cl.addWidget(self._section("Уведомления"))
-        cl.addWidget(QLabel("Разрешённое время уведомлений (локальное время)"))
+        cl.addWidget(QLabel(tr("Разрешённое время уведомлений (локальное время)")))
         notificationTimeRow = QHBoxLayout()
         start = self._working.notification_start_minute
         end = self._working.notification_end_minute
@@ -175,20 +191,20 @@ class SettingsDialog(QDialog):
         )
         self.notificationStart.setDisplayFormat("HH:mm")
         self.notificationEnd.setDisplayFormat("HH:mm")
-        notificationTimeRow.addWidget(QLabel("С"))
+        notificationTimeRow.addWidget(QLabel(tr("С")))
         notificationTimeRow.addWidget(self.notificationStart)
-        notificationTimeRow.addWidget(QLabel("до"))
+        notificationTimeRow.addWidget(QLabel(tr("до")))
         notificationTimeRow.addWidget(self.notificationEnd)
         notificationTimeRow.addStretch(1)
         cl.addLayout(notificationTimeRow)
         self.dndMode = QComboBox()
         for title, duration in (
-            ("Не беспокоить выключен", 0),
-            ("На 1 час", 3600),
-            ("На 3 часа", 10800),
-            ("На 8 часов", 28800),
-            ("Пока не отключу", -1),
-            ("Оставить активным", -2),
+            (tr("Не беспокоить выключен"), 0),
+            (tr("На 1 час"), 3600),
+            (tr("На 3 часа"), 10800),
+            (tr("На 8 часов"), 28800),
+            (tr("Пока не отключу"), -1),
+            (tr("Оставить активным"), -2),
         ):
             self.dndMode.addItem(title, duration)
         dnd_until = self._working.notification_dnd_until
@@ -205,13 +221,15 @@ class SettingsDialog(QDialog):
 
         cl.addWidget(self._section("Цвета виджетов"))
 
-        self.widgetBgBtn = self._colorButton("Фон виджета", self._working.widget_bg_color)
+        self.widgetBgBtn = self._colorButton(
+            "Фон виджета", self._working.widget_bg_color
+        )
         cl.addWidget(self.widgetBgBtn)
         self.widgetAccentBtn = self._colorButton("Акцент виджета", self._working.widget_accent_color)
         cl.addWidget(self.widgetAccentBtn)
 
         opacityRow = QHBoxLayout()
-        opacityLabel = QLabel("Прозрачность фона виджета")
+        opacityLabel = QLabel(tr("Прозрачность фона виджета"))
         self.opacityValue = QLabel(f"{int(self._working.widget_opacity * 100)}%")
         self.opacityValue.setStyleSheet("color: #8ca99d;")
         from PySide6.QtWidgets import QSlider
@@ -228,7 +246,7 @@ class SettingsDialog(QDialog):
 
         cl.addWidget(self._section("НЕСКОЛЬКО ВИДЖЕТОВ"))
         cl.addWidget(QLabel(
-            "Создавай отдельные окна с собственным именем, серверами и оформлением."
+            tr("Создавай отдельные окна с собственным именем, серверами и оформлением.")
         ))
         profileRow = QHBoxLayout()
         self.widgetProfileSelector = QComboBox()
@@ -237,16 +255,16 @@ class SettingsDialog(QDialog):
         )
         profileRow.addWidget(self.widgetProfileSelector, 1)
         addProfile = QPushButton("＋")
-        addProfile.setToolTip("Создать виджет")
+        addProfile.setToolTip(tr("Создать виджет"))
         addProfile.clicked.connect(self._add_widget_profile)
         profileRow.addWidget(addProfile)
-        self.deleteProfileButton = QPushButton("Удалить")
+        self.deleteProfileButton = QPushButton(tr("Удалить"))
         self.deleteProfileButton.clicked.connect(self._delete_widget_profile)
         profileRow.addWidget(self.deleteProfileButton)
         cl.addLayout(profileRow)
 
         self.widgetProfileName = QLineEdit()
-        self.widgetProfileName.setPlaceholderText("Название виджета")
+        self.widgetProfileName.setPlaceholderText(tr("Название виджета"))
         cl.addWidget(self.widgetProfileName)
         self.widgetProfileServerArea = QWidget()
         self.widgetProfileServerLayout = QGridLayout(self.widgetProfileServerArea)
@@ -270,7 +288,7 @@ class SettingsDialog(QDialog):
         self.profileOpacity.setRange(40, 100)
         self.profileOpacityValue = QLabel()
         profileOpacityRow = QHBoxLayout()
-        profileOpacityRow.addWidget(QLabel("Прозрачность"))
+        profileOpacityRow.addWidget(QLabel(tr("Прозрачность")))
         profileOpacityRow.addWidget(self.profileOpacity)
         profileOpacityRow.addWidget(self.profileOpacityValue)
         self.profileOpacity.valueChanged.connect(
@@ -281,10 +299,10 @@ class SettingsDialog(QDialog):
 
         cl.addWidget(self._section("Горячие клавиши (ПК)"))
 
-        hkLabel = QLabel("Показать / скрыть плавающий виджет")
+        hkLabel = QLabel(tr("Показать / скрыть плавающий виджет"))
         hkLabel.setStyleSheet("font-weight: 700; font-size: 13px;")
         cl.addWidget(hkLabel)
-        hkNote = QLabel("Нажмите клавиши в поле ниже, чтобы переназначить.")
+        hkNote = QLabel(tr("Нажмите клавиши в поле ниже, чтобы переназначить."))
         hkNote.setStyleSheet("color: #8ca99d; font-size: 11px;")
         cl.addWidget(hkNote)
 
@@ -301,8 +319,8 @@ class SettingsDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.Save | QDialogButtonBox.Cancel
         )
-        buttons.button(QDialogButtonBox.Save).setText("Сохранить")
-        buttons.button(QDialogButtonBox.Cancel).setText("Отмена")
+        buttons.button(QDialogButtonBox.Save).setText(tr("Сохранить"))
+        buttons.button(QDialogButtonBox.Cancel).setText(tr("Отмена"))
         buttons.button(QDialogButtonBox.Save).setDefault(True)
         buttons.button(QDialogButtonBox.Save).setObjectName("primaryButton")
         buttons.accepted.connect(self._save)
@@ -310,14 +328,14 @@ class SettingsDialog(QDialog):
         layout.addWidget(buttons)
 
     def _section(self, title: str) -> QLabel:
-        label = QLabel(title)
+        label = QLabel(tr(title))
         label.setStyleSheet(
             "color: #8ca99d; font-size: 9px; font-weight: 900; letter-spacing: 1.3px; margin-top: 4px;"
         )
         return label
 
     def _colorButton(self, label: str, currentHex: str) -> QPushButton:
-        btn = QPushButton(label)
+        btn = QPushButton(tr(label))
         btn.setCursor(Qt.PointingHandCursor)
         btn.setProperty("currentColor", currentHex)
         btn.setStyleSheet(
@@ -336,18 +354,18 @@ class SettingsDialog(QDialog):
     def _update_dnd_status(self) -> None:
         mode = self.dndMode.currentData()
         if mode == 0:
-            text = "Не беспокоить выключен."
+            text = tr("Не беспокоить выключен.")
         elif mode == -1:
-            text = "Не беспокоить будет активно до ручного отключения."
+            text = tr("Не беспокоить будет активно до ручного отключения.")
         elif mode == -2 and self._working.notification_dnd_until == -1:
-            text = "Не беспокоить активно — до отключения вручную."
+            text = tr("Не беспокоить активно — до отключения вручную.")
         elif mode == -2 and self._working.notification_dnd_until > time.time():
             end_time = time.strftime(
                 "%H:%M", time.localtime(self._working.notification_dnd_until)
             )
-            text = f"Не беспокоить активно до {end_time}."
+            text = tr("Не беспокоить активно до {time}.").format(time=end_time)
         else:
-            text = "Не беспокоить будет включён после сохранения."
+            text = tr("Не беспокоить будет включён после сохранения.")
         self.dndStatus.setText(text)
 
     def _pickAccent(self, color: QColor) -> None:
@@ -358,13 +376,15 @@ class SettingsDialog(QDialog):
 
     def _pickCustomColor(self) -> None:
         current = QColor(self._working.accent_color)
-        color = QColorDialog.getColor(current, self, "Выберите основной цвет")
+        color = QColorDialog.getColor(
+            current, self, tr("Выберите основной цвет")
+        )
         if color.isValid():
             self._pickAccent(color)
 
     def _pickWidgetColor(self, btn: QPushButton) -> None:
         current = QColor(btn.property("currentColor"))
-        color = QColorDialog.getColor(current, self, "Выберите цвет")
+        color = QColorDialog.getColor(current, self, tr("Выберите цвет"))
         if color.isValid():
             btn.setProperty("currentColor", color.name())
             hexName = color.name()
@@ -447,7 +467,7 @@ class SettingsDialog(QDialog):
             return
         name = self.widgetProfileName.text().strip()
         if not name:
-            name = "Виджет"
+            name = tr("Виджет")
         selected = tuple(
             address for address, checkbox in self._profile_checks
             if checkbox.isChecked()
@@ -482,7 +502,9 @@ class SettingsDialog(QDialog):
         self._save_widget_profile()
         profile = WidgetProfile(
             id=uuid.uuid4().hex,
-            name=f"Виджет {len(self._working.widgets) + 1}",
+            name=tr("Виджет {number}").format(
+                number=len(self._working.widgets) + 1
+            ),
             server_addresses=tuple(
                 server.address for server in self._working.servers
                 if server.show_in_widget
@@ -518,7 +540,7 @@ class SettingsDialog(QDialog):
 
     def _pick_profile_color(self, button: QPushButton) -> None:
         current = QColor(button.property("currentColor"))
-        color = QColorDialog.getColor(current, self, "Выберите цвет")
+        color = QColorDialog.getColor(current, self, tr("Выберите цвет"))
         if color.isValid():
             self._set_profile_color_button(button, color.name())
 
@@ -546,6 +568,7 @@ class SettingsDialog(QDialog):
             notification_end = 1440
         self._working = replace(
             self._working,
+            language=str(self.languageSelector.currentData()),
             hotkey_show_widget=hk,
             widget_opacity=self.opacitySlider.value() / 100,
             notification_start_minute=notification_start,
