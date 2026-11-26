@@ -392,12 +392,16 @@ def test_ping_sort_mode_is_valid_and_persistent() -> None:
 
 
 def test_config_interval_floor() -> None:
+    config = AppConfig.from_dict({"servers": []})
+    assert config.poll_interval == 10
     config = AppConfig.from_dict({"poll_interval": 1, "servers": []})
-    assert config.poll_interval == 15
+    assert config.poll_interval == 10
     config = AppConfig.from_dict({"poll_interval": "abc", "servers": []})
-    assert config.poll_interval == 15
+    assert config.poll_interval == 10
     config = AppConfig.from_dict({"poll_interval": 60, "servers": []})
-    assert config.poll_interval == 15
+    assert config.poll_interval == 10
+    config = AppConfig.from_dict({"poll_interval": 15, "servers": []})
+    assert config.poll_interval == 10
 
 
 def test_widget_reload_preserves_status_cache() -> None:

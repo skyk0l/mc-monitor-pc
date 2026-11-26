@@ -102,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.interval:
-        config.poll_interval = max(15, args.interval)
+        config.poll_interval = max(10, args.interval)
 
     if args.once:
         return run_once(config)
