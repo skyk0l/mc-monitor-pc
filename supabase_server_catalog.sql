@@ -53,12 +53,36 @@ create table if not exists public.server_catalog_status_samples (
 create index if not exists server_catalog_status_latest_idx
     on public.server_catalog_status_samples (server_id, sampled_at desc);
 
+create table if not exists public.server_catalog_collector_samples (
+    server_id bigint not null references public.server_catalog (id) on delete cascade,
+    sampled_at timestamptz not null,
+    online boolean not null,
+    online_count integer not null check (online_count >= 0),
+    max_count integer not null check (max_count >= 0),
+    players jsonb not null default '[]'::jsonb
+        check (jsonb_typeof(players) = 'array'),
+    primary key (server_id, sampled_at)
+);
+create index if not exists server_catalog_collector_latest_idx
+    on public.server_catalog_collector_samples (server_id, sampled_at desc);
+
+create table if not exists public.server_catalog_collection_state (
+    singleton boolean primary key default true check (singleton),
+    last_server_id bigint not null default 0
+);
+
 alter table public.server_catalog enable row level security;
 alter table public.server_catalog_votes enable row level security;
 alter table public.server_catalog_status_samples enable row level security;
+alter table public.server_catalog_collector_samples enable row level security;
+alter table public.server_catalog_collection_state enable row level security;
 revoke all on public.server_catalog from public, anon, authenticated;
 revoke all on public.server_catalog_votes from public, anon, authenticated;
 revoke all on public.server_catalog_status_samples from public, anon, authenticated;
+revoke all on public.server_catalog_collector_samples from public, anon, authenticated;
+revoke all on public.server_catalog_collection_state from public, anon, authenticated;
+grant select, insert, update
+    on public.server_catalog_collector_samples to service_role;
 
 create or replace function public.add_server_to_catalog(
     server_address text,
@@ -138,9 +162,15 @@ as $$
         select distinct on (sample.server_id)
             sample.server_id,
             sample.online_count
-        from public.server_catalog_status_samples as sample
+        from (
+            select server_id, sampled_at, online_count
+            from public.server_catalog_status_samples
+            union all
+            select server_id, sampled_at, online_count
+            from public.server_catalog_collector_samples
+        ) as sample
         where sample.sampled_at >= now() - interval '10 minutes'
-        order by sample.server_id, sample.sampled_at desc, sample.reporter_id
+        order by sample.server_id, sample.sampled_at desc, sample.online_count desc
     ),
     directory as (
         select
@@ -316,18 +346,86 @@ stable
 security definer
 set search_path = ''
 as $$
+    with all_samples as (
+        select server_id, sampled_at, online_count, max_count, players
+        from public.server_catalog_status_samples
+        union all
+        select server_id, sampled_at, online_count, max_count, players
+        from public.server_catalog_collector_samples
+    )
     select distinct on (sample.sampled_at)
         sample.sampled_at,
         sample.online_count,
         sample.max_count,
         sample.players
-    from public.server_catalog_status_samples as sample
+    from all_samples as sample
     join public.server_catalog as server on server.id = sample.server_id
     where sample.server_id = target_server_id
       and sample.sampled_at >= server.created_at
       and sample.sampled_at >= now() - interval '30 days'
-    order by sample.sampled_at desc, sample.online_count desc, sample.reporter_id
+    order by sample.sampled_at desc, sample.online_count desc
     limit greatest(1, least(coalesce(result_limit, 300), 500));
+$$;
+
+create or replace function public.claim_server_catalog_collection_batch(
+    result_limit integer default 25
+)
+returns table (id bigint, address text, protocol text)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+    current_cursor bigint;
+    selected_ids bigint[];
+begin
+    if coalesce(auth.role(), '') <> 'service_role' then
+        raise exception 'Service role required';
+    end if;
+    if result_limit is null or result_limit < 1 or result_limit > 100 then
+        raise exception 'Invalid batch size';
+    end if;
+
+    insert into public.server_catalog_collection_state (singleton)
+    values (true)
+    on conflict (singleton) do nothing;
+    select state.last_server_id
+    into current_cursor
+    from public.server_catalog_collection_state as state
+    where state.singleton
+    for update;
+
+    select array_agg(selected.id order by selected.segment, selected.id)
+    into selected_ids
+    from (
+        select candidates.id, candidates.segment
+        from (
+            select server.id, 0 as segment
+            from public.server_catalog as server
+            where server.id > current_cursor
+            union all
+            select server.id, 1 as segment
+            from public.server_catalog as server
+            where server.id <= current_cursor
+        ) as candidates
+        order by candidates.segment, candidates.id
+        limit result_limit
+    ) as selected;
+
+    if selected_ids is null then
+        return;
+    end if;
+
+    update public.server_catalog_collection_state
+    set last_server_id = selected_ids[array_length(selected_ids, 1)]
+    where singleton;
+
+    return query
+    select server.id, server.address, server.protocol
+    from public.server_catalog as server
+    where server.id = any(selected_ids)
+    order by array_position(selected_ids, server.id);
+end;
 $$;
 
 create or replace function public.vote_for_catalog_server(target_server_id bigint)
@@ -362,6 +460,8 @@ revoke all on function public.report_server_catalog_status(
 ) from public;
 revoke all on function public.get_server_catalog_history(bigint, integer)
     from public;
+revoke all on function public.claim_server_catalog_collection_batch(integer)
+    from public, anon, authenticated;
 revoke all on function public.vote_for_catalog_server(bigint)
     from public, anon;
 grant execute on function public.add_server_to_catalog(text, text, text)
@@ -374,6 +474,8 @@ grant execute on function public.report_server_catalog_status(
     to authenticated;
 grant execute on function public.get_server_catalog_history(bigint, integer)
     to anon, authenticated;
+grant execute on function public.claim_server_catalog_collection_batch(integer)
+    to service_role;
 grant execute on function public.vote_for_catalog_server(bigint)
     to authenticated;
 

@@ -3046,6 +3046,21 @@ class MainWindow(QMainWindow):
                     server.name.casefold(),
                 )
             )
+        elif mode == "ping":
+            servers.sort(
+                key=lambda server: (
+                    not bool(
+                        (status := self.controller.statuses.get(server.address))
+                        and status.online
+                    ),
+                    (
+                        status.ping_ms
+                        if status and status.online and status.ping_ms is not None
+                        else float("inf")
+                    ),
+                    server.name.casefold(),
+                )
+            )
         servers.sort(key=lambda server: not server.pinned)
         self._update_summary()
         self.empty_label.setVisible(not servers)
@@ -3265,6 +3280,7 @@ class MainWindow(QMainWindow):
             ("manual", "Вручную"),
             ("name", "По имени"),
             ("online", "По онлайну"),
+            ("ping", "По пингу (время ответа)"),
             ("date", "По дате добавления"),
         )
         for mode, title in options:
@@ -3277,7 +3293,7 @@ class MainWindow(QMainWindow):
         menu.exec(self.sort_button.mapToGlobal(self.sort_button.rect().bottomLeft()))
 
     def _set_server_sort_mode(self, mode: str) -> None:
-        if mode not in {"manual", "name", "online", "date"}:
+        if mode not in {"manual", "name", "online", "ping", "date"}:
             return
         updated = replace(self.controller.config, server_sort_mode=mode)
         try:

@@ -9,13 +9,29 @@
    to allow verified-email signups to claim a unique profile nickname.
 5. Then run [`supabase_server_catalog.sql`](./supabase_server_catalog.sql) to add the
    shared server catalog, daily voting, and online-history storage/RPCs.
-6. In Authentication → Providers → Email, enable email confirmations and configure
+6. Deploy `supabase/functions/collect-server-history` with
+   `supabase functions deploy collect-server-history`. Enable the Supabase `pg_cron`,
+   `pg_net`, and Vault extensions, then store the project URL and service-role key in
+   Vault (never in source code or a client):
+   ```sql
+   select vault.create_secret(
+    'https://<project-ref>.supabase.co', 'mcmonitor_project_url'
+   );
+   select vault.create_secret(
+    '<service-role-key>', 'mcmonitor_service_role_key'
+   );
+   ```
+   Run [`supabase_server_history_collector_schedule.sql`](./supabase_server_history_collector_schedule.sql)
+   to invoke the collector every five minutes. It rotates through up to 25 catalog
+   servers per run, stores status and visible player names, and skips servers for which
+   both status providers fail.
+7. In Authentication → Providers → Email, enable email confirmations and configure
    Supabase SMTP and the confirmation template to include `{{ .Token }}` so the app can
    verify the one-time code. The built-in test email service only delivers to
    project-authorized addresses. Existing nickname-only accounts
    remain accessible using their nickname and password; new registrations use a verified
    real email and can sign in by either email or nickname.
-7. Keep the project's publishable key in the clients. Never put a `service_role` or secret
+8. Keep the project's publishable key in the clients. Never put a `service_role` or secret
    key in the Android app or desktop executable. Row Level Security on `server_lists`
    restricts each account to its own row.
 
@@ -36,7 +52,7 @@ cloud lists. Later synchronization uses a three-way merge; when both devices ren
 same server since the last sync, the local device's name wins. Switching accounts replaces
 the current list with the selected account's list to avoid mixing account data.
 
-Catalog status samples, version, MOTD, and server icon are reported by signed-in clients
-for servers in their own lists. History therefore starts with the first client report and
-continues only while a reporting client is running; a scheduled Supabase Edge Function
-collector has not been configured.
+Catalog metadata is reported by signed-in clients for servers in their own lists. The
+optional Edge Function collector adds scheduled online history independently of active
+client sessions. It stores only the data available from public status providers; hidden
+player lists remain empty.

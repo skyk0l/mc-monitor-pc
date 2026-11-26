@@ -186,6 +186,17 @@ def test_fallback_provider() -> None:
     assert status.players == ["Notch"]
 
 
+def test_status_records_provider_response_time() -> None:
+    from unittest.mock import patch
+
+    with patch.object(api.time, "perf_counter", side_effect=[10.0, 10.123]):
+        status = api.fetch_status(
+            ServerConfig("SMP", "example.org"),
+            opener=lambda _url, _timeout: MCSRVSTAT,
+        )
+    assert status.ping_ms == 123
+
+
 def test_status_request_disables_http_caching() -> None:
     from unittest.mock import patch
 
@@ -335,6 +346,12 @@ def test_config_roundtrip() -> None:
         assert again.servers[1].protocol == "bedrock"
         assert again.server_sort_mode == "date"
         assert again.notify_joins is True
+
+
+def test_ping_sort_mode_is_valid_and_persistent() -> None:
+    config = AppConfig.from_dict({"server_sort_mode": "ping", "servers": []})
+    assert config.server_sort_mode == "ping"
+    assert AppConfig.from_dict(config.to_dict()).server_sort_mode == "ping"
 
 
 def test_config_interval_floor() -> None:
@@ -1157,6 +1174,7 @@ def main() -> None:
         test_hidden_player_list,
         test_offline_provider,
         test_fallback_provider,
+        test_status_records_provider_response_time,
         test_status_request_disables_http_caching,
         test_provider_offline_is_final,
         test_all_providers_dead,
@@ -1166,6 +1184,7 @@ def main() -> None:
         test_update_rejects_untrusted_asset_url,
         test_config_parse,
         test_config_roundtrip,
+        test_ping_sort_mode_is_valid_and_persistent,
         test_config_interval_floor,
         test_widget_reload_preserves_status_cache,
         test_priority_alert_uses_windows_notification_when_widget_is_visible,

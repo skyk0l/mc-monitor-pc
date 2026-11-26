@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import time
 import urllib.request
 from typing import Any, Callable
 
@@ -171,13 +172,16 @@ def fetch_status(
             (mcstatus_url(server), parse_mcstatus),
         )
     for url, parser in providers:
+        started = time.perf_counter()
         try:
             data = opener(url, timeout)
         except Exception as exc:  # сеть, таймаут, битый JSON, 404
             problems.append(f"{type(exc).__name__}: {exc}")
             continue
         try:
-            return parser(data)
+            status = parser(data)
+            status.ping_ms = max(0, round((time.perf_counter() - started) * 1000))
+            return status
         except Exception as exc:
             problems.append(f"разбор ответа: {exc}")
     return ServerStatus(online=False, error="; ".join(problems) or "нет ответа")

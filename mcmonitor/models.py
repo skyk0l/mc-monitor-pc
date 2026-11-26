@@ -16,6 +16,7 @@ class ServerStatus:
     motd: str = ""
     favicon: str = ""
     error: str = ""
+    ping_ms: int | None = None
 
     @property
     def players_label(self) -> str:

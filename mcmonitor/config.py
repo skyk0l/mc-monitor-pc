@@ -165,7 +165,7 @@ class AppConfig:
         if not math.isfinite(dnd_until) or (dnd_until < 0 and dnd_until != -1):
             dnd_until = 0
         sort_mode = str(data.get("server_sort_mode") or "manual")
-        if sort_mode not in {"manual", "name", "online", "date"}:
+        if sort_mode not in {"manual", "name", "online", "ping", "date"}:
             sort_mode = "manual"
         return cls(
             servers=servers,
