@@ -19,6 +19,7 @@ PROJECT_URL = "https://yjxacgziailzkzghmxgi.supabase.co"
 PUBLISHABLE_KEY = "sb_publishable_-6kGEzd6QYBe0B7ww1kODw_HC6wg789"
 _TIMEOUT_SECONDS = 12
 _USERNAME = re.compile(r"^[A-Za-z0-9_]{3,16}$")
+_EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s.]+(?:\.[^@\s.]+)+$")
 
 
 class CloudError(RuntimeError):
@@ -80,11 +81,52 @@ class PublicServer:
     protocol: str
 
 
+@dataclass(frozen=True)
+class CatalogServer:
+    server_id: int
+    name: str
+    address: str
+    protocol: str
+    votes: int
+    subscribers: int
+    online_count: int
+    has_voted_today: bool
+    version: str = ""
+    motd: str = ""
+    favicon: str = ""
+
+
+@dataclass(frozen=True)
+class CatalogHistorySample:
+    sampled_at: str
+    online_count: int
+    max_count: int
+    players: tuple[str, ...]
+
+
 def validate_credentials(username: str, password: str) -> None:
-    if not _USERNAME.fullmatch(username.strip()):
+    if not isinstance(username, str) or not _USERNAME.fullmatch(username.strip()):
         raise CloudError("Никнейм: 3–16 латинских букв, цифр или _.")
-    if len(password) < 8:
+    if not isinstance(password, str) or len(password) < 8:
         raise CloudError("Пароль должен содержать минимум 8 символов.")
+
+
+def validate_email(email: str) -> str:
+    clean = email.strip().lower() if isinstance(email, str) else ""
+    if len(clean) > 254 or not _EMAIL.fullmatch(clean):
+        raise CloudError("Укажи корректный адрес электронной почты.")
+    return clean
+
+
+def validate_login(identifier: str, password: str) -> str:
+    clean = identifier.strip() if isinstance(identifier, str) else ""
+    if "@" in clean:
+        clean = validate_email(clean)
+    elif not _USERNAME.fullmatch(clean):
+        raise CloudError("Введи корректный никнейм или адрес электронной почты.")
+    if not isinstance(password, str) or len(password) < 8:
+        raise CloudError("Пароль должен содержать минимум 8 символов.")
+    return clean
 
 
 def synthetic_email(username: str) -> str:
@@ -106,13 +148,59 @@ def sign_up(username: str, password: str) -> AccountSession:
 
 
 def sign_in(username: str, password: str) -> AccountSession:
-    validate_credentials(username, password)
+    identifier = validate_login(username, password)
     response = _request_json(
         "/auth/v1/token?grant_type=password",
         "POST",
-        {"email": synthetic_email(username), "password": password},
+        {
+            "email": identifier if "@" in identifier else synthetic_email(identifier),
+            "password": password,
+        },
     )
-    return _session_from_response(response, username.strip())
+    fallback_username = identifier.split("@", 1)[0] if "@" in identifier else identifier
+    return _session_from_response(response, fallback_username)
+
+
+def request_email_signup_code(email: str) -> None:
+    clean_email = validate_email(email)
+    _request_json(
+        "/auth/v1/otp",
+        "POST",
+        {"email": clean_email, "create_user": True},
+    )
+
+
+def complete_email_signup(
+    email: str,
+    code: str,
+    username: str,
+    password: str,
+) -> AccountSession:
+    clean_email = validate_email(email)
+    validate_credentials(username, password)
+    clean_code = code.strip() if isinstance(code, str) else ""
+    if not re.fullmatch(r"[0-9]{4,10}", clean_code):
+        raise CloudError("Введи код из письма.")
+    response = _request_json(
+        "/auth/v1/verify",
+        "POST",
+        {"email": clean_email, "token": clean_code, "type": "signup"},
+    )
+    session = _session_from_response(response, username.strip())
+    _request_with_session(
+        "/auth/v1/user",
+        "PUT",
+        {"password": password, "data": {"username": username.strip()}},
+        session,
+    )
+    _request_with_session(
+        "/rest/v1/rpc/complete_email_registration",
+        "POST",
+        {"target_username": username.strip()},
+        session,
+    )
+    session.username = username.strip()
+    return session
 
 
 def fetch_profile(session: AccountSession) -> PublicProfile:
@@ -312,6 +400,261 @@ def search_public_servers(
     return [_server_from_public_row(row) for row in _decode_rows(raw, "серверы")]
 
 
+def add_server_to_catalog(address: str, name: str, protocol: str) -> int:
+    clean_address = (address or "").strip().lower()
+    clean_name = (name or "").strip()
+    clean_protocol = (protocol or "java").strip().lower()
+    if (
+        not 1 <= len(clean_address) <= 253
+        or not re.fullmatch(r"[a-z0-9._:-]+", clean_address)
+    ):
+        raise CloudError("Укажи корректный адрес сервера.")
+    if len(clean_name) > 60:
+        raise CloudError("Название сервера не должно превышать 60 символов.")
+    if clean_protocol not in {"java", "bedrock"}:
+        raise CloudError("Выбран неизвестный протокол сервера.")
+    raw = _request_text(
+        "/rest/v1/rpc/add_server_to_catalog",
+        "POST",
+        {
+            "server_address": clean_address,
+            "server_name": clean_name,
+            "server_protocol": clean_protocol,
+        },
+        None,
+        None,
+    )
+    try:
+        server_id = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise CloudError("Каталог серверов вернул неверный идентификатор.") from exc
+    if server_id <= 0:
+        raise CloudError("Каталог серверов вернул неверный идентификатор.")
+    return server_id
+
+
+def list_server_catalog(
+    query: str = "",
+    sort_by: str = "votes",
+    limit: int = 50,
+    session: AccountSession | None = None,
+) -> list[CatalogServer]:
+    term = query.strip() if isinstance(query, str) else ""
+    if len(term) > 80:
+        raise CloudError("Поисковый запрос слишком длинный.")
+    if sort_by not in {"votes", "newest", "subscribers", "online"}:
+        raise CloudError("Неизвестный порядок каталога серверов.")
+    body = {
+        "search_term": term,
+        "sort_by": sort_by,
+        "result_limit": min(max(int(limit), 1), 100),
+    }
+    if session is None:
+        raw = _request_text(
+            "/rest/v1/rpc/list_public_server_catalog",
+            "POST",
+            body,
+            None,
+            None,
+        )
+    else:
+        raw = _request_with_session(
+            "/rest/v1/rpc/list_public_server_catalog",
+            "POST",
+            body,
+            session,
+        )
+    result: list[CatalogServer] = []
+    for row in _decode_rows(raw, "каталог серверов"):
+        try:
+            server_id = int(row.get("id"))
+            address = str(row.get("address") or "").strip()
+            name = str(row.get("name") or "").strip()
+            protocol = str(row.get("protocol") or "").strip().lower()
+            votes = int(row.get("votes") or 0)
+            subscribers = int(row.get("subscribers") or 0)
+            online_value = row.get("online_count")
+            online_count = -1 if online_value is None else int(online_value)
+            version = str(row.get("version") or "")
+            motd = str(row.get("motd") or "")
+            favicon = str(row.get("favicon") or "")
+        except (TypeError, ValueError) as exc:
+            raise CloudError("В каталоге есть некорректная запись сервера.") from exc
+        if (
+            server_id <= 0
+            or not 1 <= len(address) <= 253
+            or not re.fullmatch(r"[A-Za-z0-9._:-]+", address)
+            or protocol not in {"java", "bedrock"}
+            or votes < 0
+            or subscribers < 0
+            or online_count < -1
+            or len(version) > 100
+            or len(motd) > 2000
+            or len(favicon) > 60000
+            or (favicon and not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", favicon))
+        ):
+            raise CloudError("В каталоге есть некорректная запись сервера.")
+        result.append(
+            CatalogServer(
+                server_id,
+                name,
+                address,
+                protocol,
+                votes,
+                subscribers,
+                online_count,
+                bool(row.get("has_voted_today", False)),
+                version,
+                motd,
+                favicon,
+            )
+        )
+    return result
+
+
+def vote_for_catalog_server(session: AccountSession, server_id: int) -> bool:
+    if isinstance(server_id, bool) or not isinstance(server_id, int) or server_id <= 0:
+        raise CloudError("Выбран неверный сервер для голосования.")
+    raw = _request_with_session(
+        "/rest/v1/rpc/vote_for_catalog_server",
+        "POST",
+        {"server_id": server_id},
+        session,
+    )
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise CloudError("Голосование вернуло неверный ответ.") from exc
+    if not isinstance(result, bool):
+        raise CloudError("Голосование вернуло неверный ответ.")
+    return result
+
+
+def report_server_catalog_status(
+    session: AccountSession,
+    address: str,
+    is_online: bool,
+    player_count: int,
+    max_players: int,
+    player_names: list[str],
+    version: str = "",
+    motd: str = "",
+    favicon: str = "",
+) -> None:
+    clean_address = (address or "").strip().lower()
+    if not re.fullmatch(r"[a-z0-9._:-]{1,253}", clean_address):
+        raise CloudError("Укажи корректный адрес сервера.")
+    if not isinstance(is_online, bool):
+        raise CloudError("Статус сервера имеет неверный формат.")
+    if (
+        isinstance(player_count, bool)
+        or not isinstance(player_count, int)
+        or player_count < 0
+        or isinstance(max_players, bool)
+        or not isinstance(max_players, int)
+        or max_players < 0
+        or (max_players > 0 and player_count > max_players)
+    ):
+        raise CloudError("Счётчик игроков имеет неверный формат.")
+    if (
+        not isinstance(player_names, list)
+        or len(player_names) > 100
+        or any(
+            not isinstance(player, str)
+            or not player.strip()
+            or len(player.strip()) > 64
+            for player in player_names
+        )
+    ):
+        raise CloudError("Список игроков имеет неверный формат.")
+    if (
+        not isinstance(version, str)
+        or len(version) > 100
+        or not isinstance(motd, str)
+        or len(motd) > 2000
+        or not isinstance(favicon, str)
+        or len(favicon) > 60000
+        or (favicon and not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", favicon))
+    ):
+        raise CloudError("Информация сервера имеет неверный формат.")
+    _request_with_session(
+        "/rest/v1/rpc/report_server_catalog_status",
+        "POST",
+        {
+            "server_address": clean_address,
+            "is_online": is_online,
+            "player_count": player_count if is_online else 0,
+            "max_players": max_players,
+            "player_names": [player.strip() for player in player_names]
+            if is_online else [],
+            "server_version": version.strip(),
+            "server_motd": motd.strip(),
+            "server_icon": favicon.strip(),
+        },
+        session,
+    )
+
+
+def list_server_catalog_history(
+    server_id: int,
+    session: AccountSession | None = None,
+    limit: int = 300,
+) -> list[CatalogHistorySample]:
+    if isinstance(server_id, bool) or not isinstance(server_id, int) or server_id <= 0:
+        raise CloudError("Выбран неверный сервер.")
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise CloudError("Выбран неверный размер истории.")
+    body = {"target_server_id": server_id, "result_limit": min(max(limit, 1), 500)}
+    if session is None:
+        raw = _request_text(
+            "/rest/v1/rpc/get_server_catalog_history",
+            "POST",
+            body,
+            None,
+            None,
+        )
+    else:
+        raw = _request_with_session(
+            "/rest/v1/rpc/get_server_catalog_history",
+            "POST",
+            body,
+            session,
+        )
+    result: list[CatalogHistorySample] = []
+    for row in reversed(_decode_rows(raw, "история сервера")):
+        sampled_at = str(row.get("sampled_at") or "").strip()
+        try:
+            online_count = int(row.get("online_count"))
+            max_count = int(row.get("max_count"))
+        except (TypeError, ValueError) as exc:
+            raise CloudError("История сервера содержит неверные счётчики.") from exc
+        players = row.get("players")
+        if (
+            not sampled_at
+            or online_count < 0
+            or max_count < 0
+            or (max_count > 0 and online_count > max_count)
+            or not isinstance(players, list)
+            or len(players) > 100
+            or any(
+                not isinstance(player, str)
+                or not player.strip()
+                or len(player.strip()) > 64
+                for player in players
+            )
+        ):
+            raise CloudError("История сервера содержит некорректную запись.")
+        result.append(
+            CatalogHistorySample(
+                sampled_at,
+                online_count,
+                max_count,
+                tuple(player.strip() for player in players),
+            )
+        )
+    return result
+
+
 def list_public_servers(
     session: AccountSession, user_id: str, limit: int = 50
 ) -> list[PublicServer]:
@@ -501,6 +844,8 @@ def save_servers(session: AccountSession, servers: list[ServerConfig]) -> None:
                     "show_in_widget": server.show_in_widget,
                     "group_id": server.group_id,
                     "sort_order": server.sort_order,
+                    "pinned": server.pinned,
+                    "added_at": server.added_at,
                     "priority_players": list(server.priority_players),
                 }
                 for server in servers
@@ -616,6 +961,8 @@ def write_sync_state(
                 "show_in_widget": server.show_in_widget,
                 "group_id": server.group_id,
                 "sort_order": server.sort_order,
+                "pinned": server.pinned,
+                "added_at": server.added_at,
                 "priority_players": list(server.priority_players),
             }
             for server in servers
@@ -655,6 +1002,8 @@ def _server_from_cloud(item: dict[str, Any]) -> ServerConfig:
         show_in_widget=server.show_in_widget,
         group_id=server.group_id,
         sort_order=server.sort_order,
+        pinned=server.pinned,
+        added_at=server.added_at,
         priority_players=server.priority_players,
     )
 
@@ -673,6 +1022,8 @@ def _same_server(first: ServerConfig | None, second: ServerConfig | None) -> boo
         and first.show_in_widget == second.show_in_widget
         and first.group_id == second.group_id
         and first.sort_order == second.sort_order
+        and first.pinned == second.pinned
+        and first.added_at == second.added_at
         and first.priority_players == second.priority_players
     )
 
@@ -683,8 +1034,7 @@ def _session_from_response(data: dict[str, Any], username: str) -> AccountSessio
     user = data.get("user")
     if not access or not refresh or not isinstance(user, dict):
         raise CloudError(
-            "Для входа по никнейму отключи подтверждение email в "
-            "Supabase → Authentication → Providers → Email."
+            "Supabase не вернул сессию. Проверь подтверждение email и настройку OTP."
         )
     metadata = user.get("user_metadata")
     if not isinstance(metadata, dict):

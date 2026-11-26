@@ -39,6 +39,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QApplication, QMessageBox, QMenu, QWidget
 
 from . import __version__, api
+from . import cloud_sync
 from .auto_update import check_for_updates
 from .config import AppConfig, ConfigError, ServerConfig, load_config, resource_path
 from .models import ServerStatus
@@ -1153,6 +1154,8 @@ class WidgetApp:
         self.bridge = _Bridge()
         self.bridge.done.connect(self._on_status)
         self.pool = ThreadPoolExecutor(max_workers=4)
+        self.catalog_pool = ThreadPoolExecutor(max_workers=1)
+        self._catalog_reported_at: dict[str, float] = {}
         self.pending = 0
         self._refresh_again = False
         self.toast: Toast | None = None
@@ -1229,6 +1232,7 @@ class WidgetApp:
                 server.priority_players,
             )
             self.statuses[server.address] = status
+            self._report_catalog_status(server, status)
             if notice:
                 if not self.tray.show_message(notice.title, notice.message):
                     if self.widget.isVisible():
@@ -1242,6 +1246,42 @@ class WidgetApp:
             if self._refresh_again:
                 self._refresh_again = False
                 QTimer.singleShot(0, self.refresh)
+
+    def _report_catalog_status(
+        self, server: ServerConfig, status: ServerStatus
+    ) -> None:
+        if status.error:
+            return
+        now = time.monotonic()
+        if now - self._catalog_reported_at.get(server.address, 0.0) < 60:
+            return
+        self._catalog_reported_at[server.address] = now
+
+        def report() -> None:
+            try:
+                session = cloud_sync.load_session(self.config_path)
+                if session is None:
+                    return
+                cloud_sync.report_server_catalog_status(
+                    session,
+                    server.address,
+                    status.online,
+                    status.online_count,
+                    status.max_players,
+                    status.players[:100],
+                    status.version,
+                    status.motd,
+                    status.favicon,
+                )
+                cloud_sync.save_session(self.config_path, session)
+            except (cloud_sync.CloudError, OSError, ValueError):
+                log.warning(
+                    "не удалось отправить статус %s в общий каталог",
+                    server.address,
+                    exc_info=True,
+                )
+
+        self.catalog_pool.submit(report)
 
     # --- действия --------------------------------------------------------
     def request_refresh(self) -> None:
@@ -1359,6 +1399,7 @@ class WidgetApp:
         self.remember_state()
         self.timer.stop()
         self.pool.shutdown(wait=False, cancel_futures=True)
+        self.catalog_pool.shutdown(wait=False, cancel_futures=True)
         if self.hotkey is not None:
             try:
                 self.hotkey.unregister()

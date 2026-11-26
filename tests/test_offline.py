@@ -279,10 +279,13 @@ def test_config_parse() -> None:
         "protocol": "BEDROCK",
         "show_in_widget": True,
         "group_id": "Friends",
+        "pinned": True,
+        "added_at": 1234.5,
         "priority_players": ["Notch", " notch ", "Jeb_"],
     })
     assert bedrock.protocol == "bedrock"
     assert bedrock.show_in_widget and bedrock.group_id == "Friends"
+    assert bedrock.pinned and bedrock.added_at == 1234.5
     assert bedrock.priority_players == ("Notch", "Jeb_")
 
     for broken in ({}, {"name": "S"}, {"address": ""}, {
@@ -310,11 +313,14 @@ def test_config_roundtrip() -> None:
                 25565,
                 show_in_widget=True,
                 group_id="Friends",
+                pinned=True,
+                added_at=1234.5,
                 priority_players=("Notch",),
             ),
             ServerConfig("Bedrock", "localhost", 19132, "bedrock"),
         ])
         config.poll_interval = 30
+        config.server_sort_mode = "date"
         save_config(path, config)
 
         again = load_config(path)
@@ -323,8 +329,11 @@ def test_config_roundtrip() -> None:
         assert again.servers[0].protocol == "java"
         assert again.servers[0].show_in_widget
         assert again.servers[0].group_id == "Friends"
+        assert again.servers[0].pinned
+        assert again.servers[0].added_at == 1234.5
         assert again.servers[0].priority_players == ("Notch",)
         assert again.servers[1].protocol == "bedrock"
+        assert again.server_sort_mode == "date"
         assert again.notify_joins is True
 
 
@@ -400,6 +409,7 @@ def test_priority_alert_uses_windows_notification_when_widget_is_visible() -> No
         mark_updated=lambda: None,
     )
     controller.main_window = SimpleNamespace(refresh_statuses=lambda: None)
+    controller._report_catalog_status = lambda _server, _status: None
     controller.show_toast = toasts.append
     controller.pending = 1
     controller._refresh_again = False
@@ -408,6 +418,29 @@ def test_priority_alert_uses_windows_notification_when_widget_is_visible() -> No
 
     assert sent and "Notch" in sent[0][1]
     assert not toasts
+
+
+def test_catalog_status_reports_are_throttled() -> None:
+    from types import SimpleNamespace
+
+    from mcmonitor.widget import WidgetApp
+
+    controller = object.__new__(WidgetApp)
+    controller._catalog_reported_at = {}
+    queued: list[object] = []
+    controller.catalog_pool = SimpleNamespace(
+        submit=lambda worker: queued.append(worker)
+    )
+    server = ServerConfig("SMP", "keep.example")
+    status = ServerStatus(online=True, online_count=4, max_players=20)
+
+    WidgetApp._report_catalog_status(controller, server, status)
+    WidgetApp._report_catalog_status(controller, server, status)
+    WidgetApp._report_catalog_status(
+        controller, server, ServerStatus(error="provider unavailable")
+    )
+
+    assert len(queued) == 1
 
 
 def test_config_broken_json() -> None:
@@ -464,6 +497,13 @@ def test_installed_config_migrates_legacy_data() -> None:
 def test_cloud_account_identifiers() -> None:
     cloud_sync.validate_credentials("rinav_123", "strong-pass-123")
     assert cloud_sync.synthetic_email("Rinav_123") == "rinav_123@users.mcmonitor.invalid"
+    assert cloud_sync.validate_login(
+        "User@example.com", "strong-pass-123"
+    ) == "user@example.com"
+    assert cloud_sync.validate_login(
+        "Rinav_123", "strong-pass-123"
+    ) == "Rinav_123"
+    assert cloud_sync.validate_email("Test@Example.com") == "test@example.com"
     for username, password in (("x", "strong-pass-123"), ("bad name", "strong-pass-123"),
                                 ("valid_name", "short")):
         try:
@@ -472,6 +512,90 @@ def test_cloud_account_identifiers() -> None:
             pass
         else:
             raise AssertionError("invalid cloud credentials should be rejected")
+
+
+def test_email_signup_uses_supabase_verification_and_claims_nickname() -> None:
+    from unittest.mock import patch
+
+    requests = []
+    session_requests = []
+
+    def fake_request_json(path, method, body):
+        requests.append((path, method, body))
+        if path.endswith("/otp"):
+            return {}
+        assert path.endswith("/verify")
+        return {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "user": {
+                "id": "41e5fb07-505a-4f4d-8daf-6f0954306211",
+                "user_metadata": {},
+            },
+        }
+
+    def fake_request_with_session(path, method, body, session, prefer=None):
+        session_requests.append((path, method, body, session.user_id, prefer))
+        return ""
+
+    with (
+        patch.object(cloud_sync, "_request_json", side_effect=fake_request_json),
+        patch.object(
+            cloud_sync, "_request_with_session", side_effect=fake_request_with_session
+        ),
+    ):
+        cloud_sync.request_email_signup_code("Test@Example.com")
+        session = cloud_sync.complete_email_signup(
+            "Test@example.com", "123456", "Rinav_123", "strong-pass-123"
+        )
+
+    assert requests == [
+        ("/auth/v1/otp", "POST", {"email": "test@example.com", "create_user": True}),
+        (
+            "/auth/v1/verify",
+            "POST",
+            {"email": "test@example.com", "token": "123456", "type": "signup"},
+        ),
+    ]
+    assert session.username == "Rinav_123"
+    assert session_requests[0][0:3] == (
+        "/auth/v1/user",
+        "PUT",
+        {"password": "strong-pass-123", "data": {"username": "Rinav_123"}},
+    )
+    assert session_requests[1][0:3] == (
+        "/rest/v1/rpc/complete_email_registration",
+        "POST",
+        {"target_username": "Rinav_123"},
+    )
+
+
+def test_login_accepts_email_and_legacy_nickname() -> None:
+    from unittest.mock import patch
+
+    calls = []
+
+    def fake_request(path, method, body):
+        calls.append((path, method, body))
+        return {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "user": {
+                "id": "41e5fb07-505a-4f4d-8daf-6f0954306211",
+                "user_metadata": {"username": "Rinav_123"},
+            },
+        }
+
+    with patch.object(cloud_sync, "_request_json", side_effect=fake_request):
+        assert cloud_sync.sign_in(
+            "User@example.com", "strong-pass-123"
+        ).username == "Rinav_123"
+        assert cloud_sync.sign_in(
+            "Rinav_123", "strong-pass-123"
+        ).username == "Rinav_123"
+
+    assert calls[0][2]["email"] == "user@example.com"
+    assert calls[1][2]["email"] == "rinav_123@users.mcmonitor.invalid"
 
 
 def test_cloud_server_merge() -> None:
@@ -540,6 +664,8 @@ def test_cloud_protocol_contract() -> None:
         "show_in_widget": False,
         "group_id": None,
         "sort_order": 0,
+        "pinned": False,
+        "added_at": bedrock.added_at,
         "priority_players": [],
     }]
     assert cloud_sync._server_from_cloud({
@@ -554,6 +680,143 @@ def test_cloud_protocol_contract() -> None:
         [ServerConfig("Server", "play.example.org")],
     )
     assert merged[0].protocol == "bedrock"
+
+
+def test_server_catalog_api_contract() -> None:
+    session = cloud_sync.AccountSession("access", "refresh", "user", "nickname")
+    calls: list[tuple[str, str, dict | None, str | None]] = []
+    original_request_text = cloud_sync._request_text
+    original_request_with_session = cloud_sync._request_with_session
+
+    def capture_public(path, method, body, access_token, prefer):
+        calls.append((path, method, body, access_token))
+        if path.endswith("get_server_catalog_history"):
+            return (
+                '[{"sampled_at":"2026-11-22T00:01:00+00:00",'
+                '"online_count":11,"max_count":100,"players":["Player"]},'
+                '{"sampled_at":"2026-11-22T00:00:00+00:00",'
+                '"online_count":8,"max_count":100,"players":[]}]'
+            )
+        if path.endswith("list_public_server_catalog"):
+            return (
+                '[{"id":42,"name":"SMP","address":"play.example.org",'
+                '"protocol":"java","votes":3,"subscribers":7,'
+                '"online_count":11,"has_voted_today":false,'
+                '"version":"1.21.4","motd":"Welcome","favicon":"YWJj"}]'
+            )
+        return "42"
+
+    def capture_authenticated(path, method, body, request_session, prefer=None):
+        calls.append((path, method, body, request_session.access_token))
+        if path.endswith("get_server_catalog_history"):
+            return (
+                '[{"sampled_at":"2026-11-22T00:01:00+00:00",'
+                '"online_count":11,"max_count":100,"players":["Player"]},'
+                '{"sampled_at":"2026-11-22T00:00:00+00:00",'
+                '"online_count":8,"max_count":100,"players":[]}]'
+            )
+        if path.endswith("list_public_server_catalog"):
+            return (
+                '[{"id":42,"name":"SMP","address":"play.example.org",'
+                '"protocol":"java","votes":3,"subscribers":7,'
+                '"online_count":11,"has_voted_today":true,'
+                '"version":"1.21.4","motd":"Welcome","favicon":"YWJj"}]'
+            )
+        return "true"
+
+    cloud_sync._request_text = capture_public
+    cloud_sync._request_with_session = capture_authenticated
+    try:
+        assert cloud_sync.add_server_to_catalog(
+            "PLAY.EXAMPLE.ORG", "SMP", "java"
+        ) == 42
+        assert cloud_sync.list_server_catalog(query="play") == [
+            cloud_sync.CatalogServer(
+                42, "SMP", "play.example.org", "java", 3, 7, 11, False,
+                "1.21.4", "Welcome", "YWJj"
+            )
+        ]
+        assert cloud_sync.list_server_catalog(
+            "play", session=session
+        ) == [
+            cloud_sync.CatalogServer(
+                42, "SMP", "play.example.org", "java", 3, 7, 11, True,
+                "1.21.4", "Welcome", "YWJj"
+            )
+        ]
+        assert cloud_sync.list_server_catalog(
+            "play", sort_by="subscribers", session=session
+        )[0].subscribers == 7
+        assert cloud_sync.list_server_catalog(
+            "play", sort_by="online", session=session
+        )[0].online_count == 11
+        assert cloud_sync.list_server_catalog_history(42, session=session) == [
+            cloud_sync.CatalogHistorySample(
+                "2026-11-22T00:00:00+00:00", 8, 100, ()
+            ),
+            cloud_sync.CatalogHistorySample(
+                "2026-11-22T00:01:00+00:00", 11, 100, ("Player",)
+            )
+        ]
+        cloud_sync.report_server_catalog_status(
+            session,
+            "play.example.org",
+            True,
+            11,
+            100,
+            ["Player"],
+            "1.21.4",
+            "Welcome",
+            "YWJj",
+        )
+        assert cloud_sync.vote_for_catalog_server(session, 42) is True
+    finally:
+        cloud_sync._request_text = original_request_text
+        cloud_sync._request_with_session = original_request_with_session
+
+    assert calls[0][0] == "/rest/v1/rpc/add_server_to_catalog"
+    assert calls[0][3] is None
+    assert calls[1][0] == "/rest/v1/rpc/list_public_server_catalog"
+    assert calls[1][3] is None
+    assert calls[2][2]["search_term"] == "play"
+    assert calls[3][2]["sort_by"] == "subscribers"
+    assert calls[4][2]["sort_by"] == "online"
+    assert calls[5][0] == "/rest/v1/rpc/get_server_catalog_history"
+    assert calls[5][2] == {"target_server_id": 42, "result_limit": 300}
+    assert calls[6][0] == "/rest/v1/rpc/report_server_catalog_status"
+    assert calls[6][2]["is_online"] is True
+    assert calls[6][2]["player_count"] == 11
+    assert calls[6][2]["player_names"] == ["Player"]
+    assert calls[6][2]["server_version"] == "1.21.4"
+    assert calls[6][2]["server_motd"] == "Welcome"
+    assert calls[6][2]["server_icon"] == "YWJj"
+    assert calls[7][2] == {"server_id": 42}
+    for bad_address in ("bad host", "https://example.org", "x" * 254):
+        try:
+            cloud_sync.add_server_to_catalog(bad_address, "", "java")
+        except cloud_sync.CloudError:
+            pass
+        else:
+            raise AssertionError("invalid catalog server address should be rejected")
+    try:
+        cloud_sync.report_server_catalog_status(
+            session, "play.example.org", True, 101, 100, []
+        )
+    except cloud_sync.CloudError:
+        pass
+    else:
+        raise AssertionError("invalid catalog status should be rejected")
+
+
+def test_catalog_schema_cache_error_is_actionable() -> None:
+    from mcmonitor.main_window import _catalog_error_text
+
+    message = (
+        "Could not find the function public.list_public_server_catalog "
+        "in the schema cache"
+    )
+    assert "supabase_server_catalog.sql" in _catalog_error_text(message)
+    assert _catalog_error_text("network timeout") == "network timeout"
 
 
 def test_public_profile_validation_and_avatar_url() -> None:
@@ -906,11 +1169,16 @@ def main() -> None:
         test_config_interval_floor,
         test_widget_reload_preserves_status_cache,
         test_priority_alert_uses_windows_notification_when_widget_is_visible,
+        test_catalog_status_reports_are_throttled,
         test_config_broken_json,
         test_installed_config_migrates_legacy_data,
         test_cloud_account_identifiers,
+        test_email_signup_uses_supabase_verification_and_claims_nickname,
+        test_login_accepts_email_and_legacy_nickname,
         test_cloud_server_merge,
         test_cloud_protocol_contract,
+        test_server_catalog_api_contract,
+        test_catalog_schema_cache_error_is_actionable,
         test_public_profile_validation_and_avatar_url,
         test_public_profile_requests_are_scoped_and_opt_in,
         test_profile_social_summary_and_relationships,

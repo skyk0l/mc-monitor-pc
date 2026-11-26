@@ -6,6 +6,7 @@ import math
 import os
 import shutil
 import sys
+import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,8 @@ class ServerConfig:
     show_in_widget: bool = False
     group_id: str | None = None
     sort_order: int = 0
+    pinned: bool = False
+    added_at: float = field(default_factory=time.time)
     priority_players: tuple[str, ...] = ()
 
     @property
@@ -72,11 +75,19 @@ class ServerConfig:
                 if key not in seen_priorities:
                     priorities.append(priority)
                     seen_priorities.add(key)
+            try:
+                added_at = float(value.get("added_at") or server.added_at)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ConfigError(f"неправильный added_at у «{name}»") from exc
+            if not math.isfinite(added_at) or added_at <= 0:
+                added_at = server.added_at
             server = replace(
                 server,
                 show_in_widget=bool(value.get("show_in_widget", False)),
                 group_id=str(value.get("group_id") or ""),
                 sort_order=int(value.get("sort_order") or 0),
+                pinned=bool(value.get("pinned", False)),
+                added_at=added_at,
                 priority_players=tuple(priorities),
             )
             if not server.group_id:
@@ -114,6 +125,7 @@ class AppConfig:
     notification_start_minute: int = 0
     notification_end_minute: int = 1440
     notification_dnd_until: float = 0
+    server_sort_mode: str = "manual"
     accent_color: str = "#7ee0a3"
     widget_bg_color: str = "#252B30"
     widget_opacity: float = 0.85
@@ -152,6 +164,9 @@ class AppConfig:
             dnd_until = 0
         if not math.isfinite(dnd_until) or (dnd_until < 0 and dnd_until != -1):
             dnd_until = 0
+        sort_mode = str(data.get("server_sort_mode") or "manual")
+        if sort_mode not in {"manual", "name", "online", "date"}:
+            sort_mode = "manual"
         return cls(
             servers=servers,
             poll_interval=max(MIN_INTERVAL, interval),
@@ -161,6 +176,7 @@ class AppConfig:
             notification_start_minute=notification_start,
             notification_end_minute=notification_end,
             notification_dnd_until=dnd_until,
+            server_sort_mode=sort_mode,
             accent_color=str(data.get("accent_color", "#7ee0a3")),
             widget_bg_color=str(data.get("widget_bg_color", "#252B30")),
             widget_opacity=float(data.get("widget_opacity", 0.85)),
@@ -177,6 +193,7 @@ class AppConfig:
             "notification_start_minute": self.notification_start_minute,
             "notification_end_minute": self.notification_end_minute,
             "notification_dnd_until": self.notification_dnd_until,
+            "server_sort_mode": self.server_sort_mode,
             "accent_color": self.accent_color,
             "widget_bg_color": self.widget_bg_color,
             "widget_opacity": self.widget_opacity,
@@ -190,6 +207,8 @@ class AppConfig:
                     "show_in_widget": server.show_in_widget,
                     "group_id": server.group_id,
                     "sort_order": server.sort_order,
+                    "pinned": server.pinned,
+                    "added_at": server.added_at,
                     "priority_players": list(server.priority_players),
                 }
                 for server in self.servers
