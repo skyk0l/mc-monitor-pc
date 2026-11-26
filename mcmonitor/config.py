@@ -113,6 +113,59 @@ class ServerConfig:
         return cls(name=name.strip() or host, host=host, port=port, protocol=protocol)
 
 
+@dataclass(frozen=True)
+class WidgetProfile:
+    """One named desktop widget with its own server set and appearance."""
+
+    id: str
+    name: str
+    server_addresses: tuple[str, ...] = ()
+    widget_bg_color: str = "#252B30"
+    widget_accent_color: str = "#A7C6A4"
+    widget_opacity: float = 0.85
+    x: int | None = None
+    y: int | None = None
+    always_on_top: bool = True
+    visible: bool = True
+
+    @classmethod
+    def parse(cls, value: Any) -> "WidgetProfile":
+        if not isinstance(value, dict):
+            raise ConfigError("неправильный профиль виджета")
+        profile_id = str(value.get("id") or "").strip()
+        name = str(value.get("name") or "").strip()
+        addresses = value.get("server_addresses", [])
+        if (
+            not profile_id
+            or len(profile_id) > 64
+            or not name
+            or len(name) > 40
+            or not isinstance(addresses, list)
+            or any(not isinstance(address, str) or not address for address in addresses)
+        ):
+            raise ConfigError("неправильный профиль виджета")
+        try:
+            opacity = float(value.get("widget_opacity", 0.85))
+            x = int(value["x"]) if value.get("x") is not None else None
+            y = int(value["y"]) if value.get("y") is not None else None
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ConfigError(f"неправильные параметры виджета «{name}»") from exc
+        if not math.isfinite(opacity):
+            opacity = 0.85
+        return cls(
+            id=profile_id,
+            name=name,
+            server_addresses=tuple(dict.fromkeys(addresses)),
+            widget_bg_color=str(value.get("widget_bg_color", "#252B30")),
+            widget_accent_color=str(value.get("widget_accent_color", "#A7C6A4")),
+            widget_opacity=min(1.0, max(0.4, opacity)),
+            x=x,
+            y=y,
+            always_on_top=bool(value.get("always_on_top", True)),
+            visible=bool(value.get("visible", True)),
+        )
+
+
 @dataclass
 class AppConfig:
     """Что и как проверяем."""
@@ -130,6 +183,7 @@ class AppConfig:
     widget_bg_color: str = "#252B30"
     widget_opacity: float = 0.85
     widget_accent_color: str = "#A7C6A4"
+    widgets: list[WidgetProfile] = field(default_factory=list)
     hotkey_show_widget: str = "ctrl+shift+m"
 
     @classmethod
@@ -142,6 +196,12 @@ class AppConfig:
         if not isinstance(raw_servers, list):
             raise ConfigError("поле servers должно быть списком")
         servers = [ServerConfig.parse(item) for item in raw_servers]
+        raw_widgets = data.get("widgets", [])
+        if not isinstance(raw_widgets, list):
+            raise ConfigError("поле widgets должно быть списком")
+        widgets = [WidgetProfile.parse(item) for item in raw_widgets]
+        if len({widget.id for widget in widgets}) != len(widgets):
+            raise ConfigError("идентификаторы виджетов должны быть уникальными")
         try:
             interval = int(data.get("poll_interval") or DEFAULT_INTERVAL)
         except (TypeError, ValueError):
@@ -181,6 +241,7 @@ class AppConfig:
             widget_bg_color=str(data.get("widget_bg_color", "#252B30")),
             widget_opacity=float(data.get("widget_opacity", 0.85)),
             widget_accent_color=str(data.get("widget_accent_color", "#A7C6A4")),
+            widgets=widgets,
             hotkey_show_widget=str(data.get("hotkey_show_widget", "ctrl+shift+m")),
         )
 
@@ -198,6 +259,21 @@ class AppConfig:
             "widget_bg_color": self.widget_bg_color,
             "widget_opacity": self.widget_opacity,
             "widget_accent_color": self.widget_accent_color,
+            "widgets": [
+                {
+                    "id": widget.id,
+                    "name": widget.name,
+                    "server_addresses": list(widget.server_addresses),
+                    "widget_bg_color": widget.widget_bg_color,
+                    "widget_accent_color": widget.widget_accent_color,
+                    "widget_opacity": widget.widget_opacity,
+                    "x": widget.x,
+                    "y": widget.y,
+                    "always_on_top": widget.always_on_top,
+                    "visible": widget.visible,
+                }
+                for widget in self.widgets
+            ],
             "hotkey_show_widget": self.hotkey_show_widget,
             "servers": [
                 {

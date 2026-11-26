@@ -6,6 +6,7 @@ import math
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -41,7 +42,15 @@ from PySide6.QtWidgets import QApplication, QMessageBox, QMenu, QWidget
 from . import __version__, api
 from . import cloud_sync
 from .auto_update import check_for_updates
-from .config import AppConfig, ConfigError, ServerConfig, load_config, resource_path
+from .config import (
+    AppConfig,
+    ConfigError,
+    ServerConfig,
+    WidgetProfile,
+    load_config,
+    resource_path,
+    save_config,
+)
 from .models import ServerStatus
 from .notify import change_notice
 from .ui_state import WindowState, load_state, save_state
@@ -125,11 +134,24 @@ class _Bridge(QObject):
 
 
 class StatusWidget(QWidget):
-    def __init__(self, app: "WidgetApp") -> None:
+    def __init__(
+        self, app: "WidgetApp", profile: WidgetProfile | None = None
+    ) -> None:
         super().__init__(None)
         self.app = app
+        self.profile = profile
         self.statuses = app.statuses
-        self.state = app.window_state
+        self.state = (
+            WindowState(
+                x=profile.x,
+                y=profile.y,
+                opacity=profile.widget_opacity,
+                always_on_top=profile.always_on_top,
+                widget_visible=profile.visible,
+            )
+            if profile is not None
+            else app.window_state
+        )
         self._hover = 0.0
         self._pulse = 0.0
         self._spin = 0.0
@@ -161,7 +183,9 @@ class StatusWidget(QWidget):
         self.setWindowFlags(flags)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
-        self.setWindowTitle("MC Monitor")
+        self.setWindowTitle(
+            "MC Monitor" if profile is None else f"MC Monitor · {profile.name}"
+        )
         self.setToolTip(
             "Клик по серверу — список игроков · Перетащи карточку · ПКМ — меню · Ctrl+колесо — прозрачность"
         )
@@ -208,7 +232,18 @@ class StatusWidget(QWidget):
 
     # --- геометрия -------------------------------------------------------
     def _widget_servers(self) -> list[ServerConfig]:
+        if self.profile is not None:
+            addresses = set(self.profile.server_addresses)
+            return [
+                server for server in self.app.config.servers
+                if server.address in addresses
+            ]
         return [server for server in self.app.config.servers if server.show_in_widget]
+
+    def _appearance(self, field: str):
+        if self.profile is not None:
+            return getattr(self.profile, field)
+        return getattr(self.app.config, field)
 
     def _row_count(self) -> int:
         return max(1, len(self._widget_servers()))
@@ -453,10 +488,14 @@ class StatusWidget(QWidget):
     def _paint_card(self, painter: QPainter, card: QRectF) -> None:
         path = QPainterPath()
         path.addRoundedRect(card, RADIUS, RADIUS)
-        base_color = QColor(self.app.config.widget_bg_color)
+        base_color = QColor(self._appearance("widget_bg_color"))
         if not base_color.isValid():
             base_color = QColor("#252B30")
-        opacity = max(0.35, min(1.0, self.app.config.widget_opacity))
+        opacity = (
+            1.0
+            if self.profile is not None
+            else max(0.35, min(1.0, self._appearance("widget_opacity")))
+        )
         top_color = base_color.lighter(118)
         middle_color = QColor(base_color)
         bottom_color = base_color.darker(112)
@@ -479,7 +518,7 @@ class StatusWidget(QWidget):
         border = QPainterPath()
         border.addRoundedRect(card.adjusted(0.5, 0.5, -0.5, -0.5), RADIUS, RADIUS)
         painter.setBrush(Qt.NoBrush)
-        border_color = QColor(self.app.config.widget_accent_color)
+        border_color = QColor(self._appearance("widget_accent_color"))
         if not border_color.isValid():
             border_color = QColor("#A7C6A4")
         border_color.setAlpha(int(18 + 24 * self._hover))
@@ -487,7 +526,7 @@ class StatusWidget(QWidget):
         painter.drawPath(border)
 
     def _paint_header(self, painter: QPainter, card: QRectF) -> None:
-        if not self._brand_logo.isNull():
+        if self.profile is None and not self._brand_logo.isNull():
             logo = self._brand_logo.scaled(
                 118, 19, Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
@@ -498,15 +537,24 @@ class StatusWidget(QWidget):
 
         selected = self._widget_servers()
         group_names = {server.group_id for server in selected if server.group_id}
-        if selected:
-            title = next(iter(group_names)) if len(group_names) == 1 else "ИЗБРАННОЕ"
-            title_font = _font(8, QFont.Weight.DemiBold, 0.8)
+        title = (
+            self.profile.name
+            if self.profile is not None
+            else next(iter(group_names)) if len(group_names) == 1 else "ИЗБРАННОЕ"
+        )
+        if selected or self.profile is not None:
+            title_font = _font(
+                10 if self.profile is not None else 8,
+                QFont.Weight.DemiBold,
+                0.4 if self.profile is not None else 0.8,
+            )
             painter.setFont(title_font)
             painter.setPen(QColor(160, 174, 191, 220))
+            left = 17 if self.profile is not None else 142
             title_rect = QRectF(
-                card.left() + 142,
+                card.left() + left,
                 card.top() + 10,
-                max(0, card.width() - 142 - 2 * BUTTON_SIZE - 40),
+                max(0, card.width() - left - 2 * BUTTON_SIZE - 40),
                 HEADER_HEIGHT - 20,
             )
             painter.drawText(
@@ -539,7 +587,7 @@ class StatusWidget(QWidget):
                     painter.drawEllipse(rect.adjusted(1, 1, -1, -1))
 
         glyph_alpha = int(235 * min(1.0, buttons_alpha + 0.15))
-        glyph_color = QColor(self.app.config.widget_accent_color)
+        glyph_color = QColor(self._appearance("widget_accent_color"))
         if not glyph_color.isValid():
             glyph_color = QColor(198, 206, 222)
         glyph_color.setAlpha(glyph_alpha)
@@ -562,7 +610,9 @@ class StatusWidget(QWidget):
         if not servers:
             painter.setFont(_font(13, QFont.Weight.DemiBold))
             painter.setPen(SOFT)
-            message = "Нет серверов" if not self.app.config.servers else "Виджет пока пуст"
+            message = (
+                "Нет серверов" if not self.app.config.servers else "Виджет пока пуст"
+            )
             painter.drawText(QPointF(card.left() + 34, top + 24), message)
             painter.setFont(_font(10))
             painter.setPen(DIM)
@@ -588,7 +638,7 @@ class StatusWidget(QWidget):
         row_top = row.top()
         status = self.statuses.get(server.address)
         online = status.online if status else None
-        online_color = QColor(self.app.config.widget_accent_color)
+        online_color = QColor(self._appearance("widget_accent_color"))
         if not online_color.isValid():
             online_color = MINT
         color = online_color if online else CORAL if online is False else AMBER
@@ -924,7 +974,7 @@ class StatusWidget(QWidget):
             self._press_pos = None
             if rect.contains(pos):
                 if action == "close":
-                    self.app.hide_widget()
+                    self.app.hide_widget(self)
                 else:
                     self.app.request_refresh()
             self._update_cursor(pos.toPoint())
@@ -938,7 +988,7 @@ class StatusWidget(QWidget):
             self._dragging = False
             self._update_cursor(pos.toPoint())
             if was_dragging:
-                self.app.remember_position()
+                self.app.remember_position(self)
             else:
                 address = self._row_at(pos.toPoint())
                 if address:
@@ -976,9 +1026,9 @@ class StatusWidget(QWidget):
         open_action = menu.addAction("Открыть servers.json")
         open_action.triggered.connect(self.app.open_config)
 
-        if self.app.config.servers:
+        if self._widget_servers():
             players_menu = menu.addMenu("Игроки")
-            for server in self.app.config.servers:
+            for server in self._widget_servers():
                 action = players_menu.addAction(server.name)
                 action.setCheckable(True)
                 action.setChecked(self.expanded == server.address)
@@ -1017,16 +1067,16 @@ class StatusWidget(QWidget):
         self.move(position)
         self.setWindowOpacity(self.state.opacity)
         self.show()
-        self.app.remember_state()
+        self.app.remember_state(self)
 
     def set_opacity(self, value: float) -> None:
         self.state.opacity = min(1.0, max(0.5, float(value)))
         self.setWindowOpacity(self.state.opacity)
-        self.app.remember_state()
+        self.app.remember_state(self)
 
     def closeEvent(self, event) -> None:  # noqa: ANN001
         event.ignore()
-        self.app.hide_widget()
+        self.app.hide_widget(self)
 
 
 class Toast(QWidget):
@@ -1150,7 +1200,8 @@ class WidgetApp:
         self.qapp.setWindowIcon(QIcon(str(resource_path("assets/icon.ico"))))
         self.qapp.setQuitOnLastWindowClosed(False)
         self.statuses: dict[str, ServerStatus] = {}
-        self.widget = StatusWidget(self)
+        self.widgets: list[StatusWidget] = []
+        self._sync_widgets()
         self.bridge = _Bridge()
         self.bridge.done.connect(self._on_status)
         self.pool = ThreadPoolExecutor(max_workers=4)
@@ -1159,7 +1210,7 @@ class WidgetApp:
         self.pending = 0
         self._refresh_again = False
         self.toast: Toast | None = None
-        self.timer = QTimer(self.widget)
+        self.timer = QTimer(self.qapp)
         self.timer.timeout.connect(self.refresh)
         self._quitting = False
         self.main_window = MainWindow(self)
@@ -1172,16 +1223,48 @@ class WidgetApp:
             self._startup_hotkey_error = str(exc)
             log.warning("Не удалось зарегистрировать горячую клавишу: %s", exc)
 
+    def _sync_widgets(self) -> None:
+        profiles: list[WidgetProfile | None] = self.config.widgets or [None]
+        current = {
+            widget.profile.id if widget.profile is not None else "legacy": widget
+            for widget in self.widgets
+        }
+        updated: list[StatusWidget] = []
+        for profile in profiles:
+            profile_id = profile.id if profile is not None else "legacy"
+            widget = current.pop(profile_id, None)
+            if widget is None:
+                widget = StatusWidget(self, profile)
+            elif profile is not None:
+                widget.profile = profile
+                widget.setWindowTitle(f"MC Monitor · {profile.name}")
+                widget.state.x = profile.x
+                widget.state.y = profile.y
+                widget.state.opacity = profile.widget_opacity
+                widget.state.always_on_top = profile.always_on_top
+                widget.state.widget_visible = profile.visible
+                if profile.x is not None and profile.y is not None:
+                    widget.move(profile.x, profile.y)
+                widget.setWindowOpacity(profile.widget_opacity)
+            widget.statuses = self.statuses
+            widget.resize_to_content()
+            widget.update()
+            updated.append(widget)
+        for obsolete in current.values():
+            obsolete.hide()
+            obsolete.deleteLater()
+        self.widgets = updated
+        self.widget = self.widgets[0]
+
     # --- запуск ----------------------------------------------------------
     def run(self) -> int:
         self.qapp.aboutToQuit.connect(self.shutdown)
         self.tray.show()
         self.main_window.show()
-        if self.window_state.widget_visible:
-            self.show_widget()
-        else:
-            self.main_window.set_widget_visibility(False)
-            self.tray.set_widget_visibility(False)
+        for widget in self.widgets:
+            if widget.state.widget_visible:
+                self.show_widget(widget=widget)
+        self._update_widget_visibility_actions()
         if self._startup_hotkey_error:
             QMessageBox.warning(
                 self.main_window,
@@ -1206,13 +1289,15 @@ class WidgetApp:
         self._refresh_again = False
         servers = self.config.servers
         self.pending = len(servers)
-        self.widget.mark_loading(bool(servers))
+        for widget in self.widgets:
+            widget.mark_loading(bool(servers))
         self.main_window.refresh_statuses()
         for server in servers:
             future = self.pool.submit(api.fetch_status, server)
             future.add_done_callback(lambda f, s=server: self._deliver(s, f))
         if not servers:
-            self.widget.mark_updated()
+            for widget in self.widgets:
+                widget.mark_updated()
 
     def _deliver(self, server: ServerConfig, future) -> None:  # noqa: ANN001
         try:
@@ -1235,14 +1320,16 @@ class WidgetApp:
             self._report_catalog_status(server, status)
             if notice:
                 if not self.tray.show_message(notice.title, notice.message):
-                    if self.widget.isVisible():
+                    if any(widget.isVisible() for widget in self.widgets):
                         self.show_toast(notice.message)
-            self.widget.status_changed(server.address)
+            for widget in self.widgets:
+                widget.status_changed(server.address)
             self.main_window.refresh_statuses()
         self.pending = max(0, self.pending - 1)
         if not self.pending:
-            self.widget.mark_loading(False)
-            self.widget.mark_updated()
+            for widget in self.widgets:
+                widget.mark_loading(False)
+                widget.mark_updated()
             if self._refresh_again:
                 self._refresh_again = False
                 QTimer.singleShot(0, self.refresh)
@@ -1293,7 +1380,16 @@ class WidgetApp:
         except ConfigError as exc:
             self.show_toast(f"Ошибка в настройках: {exc}")
             return
+        had_profiles = bool(self.config.widgets)
+        if had_profiles and not config.widgets:
+            self.window_state.widget_visible = any(
+                server.show_in_widget for server in config.servers
+            )
         self.config = config
+        self._sync_widgets()
+        for widget in self.widgets:
+            if widget.state.widget_visible:
+                self.show_widget(widget=widget)
         hotkey_error: Exception | None = None
         try:
             self.set_hotkey(config.hotkey_show_widget)
@@ -1306,19 +1402,21 @@ class WidgetApp:
         for address in tuple(self.statuses):
             if address not in addresses:
                 del self.statuses[address]
-        self.widget.display = {
-            address: value
-            for address, value in self.widget.display.items()
-            if address in addresses
-        }
-        if self.widget.expanded and self.widget.expanded not in addresses:
-            self.widget.expanded = None
-            self.widget._extra = 0.0
-            self.widget._player_scroll.clear()
-        self.widget._hovered_row = None
-        self.widget.resize_to_content()
-        self.widget.update()
+        for widget in self.widgets:
+            widget.display = {
+                address: value
+                for address, value in widget.display.items()
+                if address in addresses
+            }
+            if widget.expanded and widget.expanded not in addresses:
+                widget.expanded = None
+                widget._extra = 0.0
+                widget._player_scroll.clear()
+            widget._hovered_row = None
+            widget.resize_to_content()
+            widget.update()
         self.main_window.refresh_servers()
+        self._update_widget_visibility_actions()
         if hotkey_error is not None:
             self.tray.show_message(
                 "Горячая клавиша недоступна",
@@ -1326,19 +1424,29 @@ class WidgetApp:
             )
         self.refresh()
 
-    def show_widget(self, address: str | None = None) -> None:
-        if not self.widget.isVisible():
-            self.widget._closing = False
-            self.widget.show()
-            self.widget.animate_in()
-        self._set_widget_visibility(True)
-        self.widget.raise_()
-        if address and any(server.address == address for server in self.config.servers):
-            if self.widget.expanded != address:
-                self.widget.toggle_players(address)
+    def show_widget(
+        self,
+        address: str | None = None,
+        widget: StatusWidget | None = None,
+    ) -> None:
+        targets = [widget] if widget is not None else self.widgets
+        for target in targets:
+            if not target.isVisible():
+                target._closing = False
+                target.show()
+                target.animate_in()
+            target.state.widget_visible = True
+            target.raise_()
+            if address and any(
+                server.address == address for server in target._widget_servers()
+            ):
+                if target.expanded != address:
+                    target.toggle_players(address)
+            self.remember_state(target)
+        self._update_widget_visibility_actions()
 
     def toggle_widget(self) -> None:
-        if self.widget.isVisible():
+        if any(widget.isVisible() for widget in self.widgets):
             self.hide_widget()
         else:
             self.show_widget()
@@ -1351,15 +1459,18 @@ class WidgetApp:
         else:
             self.hotkey.set_sequence(sequence)
 
-    def hide_widget(self) -> None:
-        self.widget.hide()
-        self._set_widget_visibility(False)
+    def hide_widget(self, widget: StatusWidget | None = None) -> None:
+        targets = [widget] if widget is not None else self.widgets
+        for target in targets:
+            target.hide()
+            target.state.widget_visible = False
+            self.remember_state(target)
+        self._update_widget_visibility_actions()
 
-    def _set_widget_visibility(self, visible: bool) -> None:
-        changed = self.window_state.widget_visible != visible
+    def _update_widget_visibility_actions(self) -> None:
+        visible = any(widget.isVisible() for widget in self.widgets)
         self.window_state.widget_visible = visible
-        if changed:
-            self.remember_state()
+        self.remember_state()
         self.main_window.set_widget_visibility(visible)
         self.tray.set_widget_visibility(visible)
 
@@ -1371,32 +1482,79 @@ class WidgetApp:
         except OSError:
             log.warning("не удалось открыть %s", self.config_path, exc_info=True)
 
-    def remember_position(self) -> None:
-        self.window_state.x = self.widget.x()
-        self.window_state.y = self.widget.y()
+    def remember_position(self, widget: StatusWidget | None = None) -> None:
+        target = widget or self.widget
+        if target.profile is not None:
+            self._save_profile_state(target)
+            return
+        self.window_state.x = target.x()
+        self.window_state.y = target.y()
         save_state(self.state_path, self.window_state)
 
-    def remember_state(self) -> None:
-        save_state(self.state_path, self.window_state)
+    def remember_state(self, widget: StatusWidget | None = None) -> None:
+        if widget is None or widget.profile is None:
+            save_state(self.state_path, self.window_state)
+        else:
+            self._save_profile_state(widget)
+
+    def _save_profile_state(self, widget: StatusWidget) -> None:
+        profile = widget.profile
+        if profile is None:
+            return
+        updated = replace(
+            profile,
+            x=widget.x(),
+            y=widget.y(),
+            widget_opacity=widget.state.opacity,
+            always_on_top=widget.state.always_on_top,
+            visible=widget.state.widget_visible,
+        )
+        self.config = replace(
+            self.config,
+            widgets=[
+                updated if item.id == profile.id else item
+                for item in self.config.widgets
+            ],
+        )
+        widget.profile = updated
+        try:
+            save_config(self.config_path, self.config)
+        except OSError:
+            log.exception("не удалось сохранить состояние виджета %s", profile.name)
 
     def show_toast(self, message: str) -> None:
         if self.toast is not None:
             self.toast.close()
         self.toast = Toast(message)
-        self.toast.pop(self.widget)
+        anchor = next(
+            (widget for widget in self.widgets if widget.isVisible()), self.widget
+        )
+        self.toast.pop(anchor)
 
     def quit(self) -> None:
         if self._quitting:
             return
         self._quitting = True
         self.tray.hide()
-        if self.widget.isVisible():
-            self.widget.animate_out(self.qapp.quit)
-        else:
+        visible = [widget for widget in self.widgets if widget.isVisible()]
+        if not visible:
             self.qapp.quit()
+            return
+        remaining = len(visible)
+
+        def finish_one() -> None:
+            nonlocal remaining
+            remaining -= 1
+            if remaining == 0:
+                self.qapp.quit()
+
+        for widget in visible:
+            widget.animate_out(finish_one)
 
     def shutdown(self) -> None:
         self.remember_state()
+        for widget in self.widgets:
+            self.remember_state(widget)
         self.timer.stop()
         self.pool.shutdown(wait=False, cancel_futures=True)
         self.catalog_pool.shutdown(wait=False, cancel_futures=True)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import uuid
 from dataclasses import replace
 from typing import Any
 
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QKeySequenceEdit,
     QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
     QTimeEdit,
@@ -25,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .config import AppConfig, save_config
+from .config import AppConfig, WidgetProfile, save_config
 
 
 class ColorChip(QFrame):
@@ -112,7 +114,10 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(520)
         self.setMinimumHeight(620)
         self._config = config
-        self._working = replace(config)
+        self._working = replace(config, widgets=list(config.widgets))
+        self._profile_checks: list[tuple[str, QCheckBox]] = []
+        self._loading_profile = False
+        self._editing_profile_id: str | None = None
 
         self._build_ui()
         self._load_from_config()
@@ -221,6 +226,59 @@ class SettingsDialog(QDialog):
         opacityRow.addWidget(self.opacityValue)
         cl.addLayout(opacityRow)
 
+        cl.addWidget(self._section("НЕСКОЛЬКО ВИДЖЕТОВ"))
+        cl.addWidget(QLabel(
+            "Создавай отдельные окна с собственным именем, серверами и оформлением."
+        ))
+        profileRow = QHBoxLayout()
+        self.widgetProfileSelector = QComboBox()
+        self.widgetProfileSelector.currentIndexChanged.connect(
+            self._profile_selection_changed
+        )
+        profileRow.addWidget(self.widgetProfileSelector, 1)
+        addProfile = QPushButton("＋")
+        addProfile.setToolTip("Создать виджет")
+        addProfile.clicked.connect(self._add_widget_profile)
+        profileRow.addWidget(addProfile)
+        self.deleteProfileButton = QPushButton("Удалить")
+        self.deleteProfileButton.clicked.connect(self._delete_widget_profile)
+        profileRow.addWidget(self.deleteProfileButton)
+        cl.addLayout(profileRow)
+
+        self.widgetProfileName = QLineEdit()
+        self.widgetProfileName.setPlaceholderText("Название виджета")
+        cl.addWidget(self.widgetProfileName)
+        self.widgetProfileServerArea = QWidget()
+        self.widgetProfileServerLayout = QGridLayout(self.widgetProfileServerArea)
+        self.widgetProfileServerLayout.setContentsMargins(0, 0, 0, 0)
+        cl.addWidget(self.widgetProfileServerArea)
+        self.profileBgBtn = self._colorButton("Фон", self._working.widget_bg_color)
+        self.profileAccentBtn = self._colorButton(
+            "Акцент", self._working.widget_accent_color
+        )
+        self.profileBgBtn.clicked.disconnect()
+        self.profileAccentBtn.clicked.disconnect()
+        self.profileBgBtn.clicked.connect(
+            lambda: self._pick_profile_color(self.profileBgBtn)
+        )
+        self.profileAccentBtn.clicked.connect(
+            lambda: self._pick_profile_color(self.profileAccentBtn)
+        )
+        cl.addWidget(self.profileBgBtn)
+        cl.addWidget(self.profileAccentBtn)
+        self.profileOpacity = QSlider(Qt.Horizontal)
+        self.profileOpacity.setRange(40, 100)
+        self.profileOpacityValue = QLabel()
+        profileOpacityRow = QHBoxLayout()
+        profileOpacityRow.addWidget(QLabel("Прозрачность"))
+        profileOpacityRow.addWidget(self.profileOpacity)
+        profileOpacityRow.addWidget(self.profileOpacityValue)
+        self.profileOpacity.valueChanged.connect(
+            lambda value: self.profileOpacityValue.setText(f"{value}%")
+        )
+        cl.addLayout(profileOpacityRow)
+        self._refresh_profile_selector()
+
         cl.addWidget(self._section("Горячие клавиши (ПК)"))
 
         hkLabel = QLabel("Показать / скрыть плавающий виджет")
@@ -319,7 +377,162 @@ class SettingsDialog(QDialog):
                 f"QPushButton:hover {{ opacity: 0.9; }}"
             )
 
+    def _refresh_profile_selector(self, selected_id: str | None = None) -> None:
+        self._loading_profile = True
+        self.widgetProfileSelector.clear()
+        for profile in self._working.widgets:
+            self.widgetProfileSelector.addItem(profile.name, profile.id)
+        if selected_id:
+            index = self.widgetProfileSelector.findData(selected_id)
+            if index >= 0:
+                self.widgetProfileSelector.setCurrentIndex(index)
+        self._loading_profile = False
+        self._load_widget_profile()
+
+    def _profile_selection_changed(self, _index: int) -> None:
+        if self._loading_profile:
+            return
+        self._save_widget_profile()
+        self._load_widget_profile()
+
+    def _load_widget_profile(self) -> None:
+        profile_id = self.widgetProfileSelector.currentData()
+        self._editing_profile_id = profile_id
+        profile = next(
+            (item for item in self._working.widgets if item.id == profile_id),
+            None,
+        )
+        self._loading_profile = True
+        self.widgetProfileName.setEnabled(profile is not None)
+        self.widgetProfileName.setText(profile.name if profile else "")
+        self.deleteProfileButton.setEnabled(profile is not None)
+        self.profileBgBtn.setEnabled(profile is not None)
+        self.profileAccentBtn.setEnabled(profile is not None)
+        self.profileOpacity.setEnabled(profile is not None)
+        while self.widgetProfileServerLayout.count():
+            item = self.widgetProfileServerLayout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        self._profile_checks.clear()
+        if profile is not None:
+            selected = set(profile.server_addresses)
+            for index, server in enumerate(self._working.servers):
+                checkbox = QCheckBox(server.name)
+                checkbox.setToolTip(server.address)
+                checkbox.setChecked(server.address in selected)
+                self.widgetProfileServerLayout.addWidget(checkbox, index, 0)
+                self._profile_checks.append((server.address, checkbox))
+            self._set_profile_color_button(
+                self.profileBgBtn, profile.widget_bg_color
+            )
+            self._set_profile_color_button(
+                self.profileAccentBtn, profile.widget_accent_color
+            )
+            self.profileOpacity.setValue(round(profile.widget_opacity * 100))
+        else:
+            self._set_profile_color_button(
+                self.profileBgBtn, self._working.widget_bg_color
+            )
+            self._set_profile_color_button(
+                self.profileAccentBtn, self._working.widget_accent_color
+            )
+            self.profileOpacity.setValue(round(self._working.widget_opacity * 100))
+        self._loading_profile = False
+
+    def _save_widget_profile(self) -> None:
+        if self._loading_profile:
+            return
+        profile_id = self._editing_profile_id
+        if not profile_id:
+            return
+        name = self.widgetProfileName.text().strip()
+        if not name:
+            name = "Виджет"
+        selected = tuple(
+            address for address, checkbox in self._profile_checks
+            if checkbox.isChecked()
+        )
+        background = str(self.profileBgBtn.property("currentColor"))
+        accent = str(self.profileAccentBtn.property("currentColor"))
+        updated = []
+        for profile in self._working.widgets:
+            if profile.id == profile_id:
+                profile = replace(
+                    profile,
+                    name=name[:40],
+                    server_addresses=selected,
+                    widget_bg_color=background,
+                    widget_accent_color=accent,
+                    widget_opacity=self.profileOpacity.value() / 100,
+                )
+            updated.append(profile)
+        servers = self._working.servers
+        if updated and updated[0].id == profile_id:
+            selected_set = set(selected)
+            servers = [
+                replace(server, show_in_widget=server.address in selected_set)
+                for server in servers
+            ]
+        self._working = replace(self._working, widgets=updated, servers=servers)
+        index = self.widgetProfileSelector.findData(profile_id)
+        if index >= 0:
+            self.widgetProfileSelector.setItemText(index, name[:40])
+
+    def _add_widget_profile(self) -> None:
+        self._save_widget_profile()
+        profile = WidgetProfile(
+            id=uuid.uuid4().hex,
+            name=f"Виджет {len(self._working.widgets) + 1}",
+            server_addresses=tuple(
+                server.address for server in self._working.servers
+                if server.show_in_widget
+            ) if not self._working.widgets else (),
+            widget_bg_color=self._working.widget_bg_color,
+            widget_accent_color=self._working.widget_accent_color,
+            widget_opacity=self._working.widget_opacity,
+        )
+        self._working = replace(
+            self._working, widgets=[*self._working.widgets, profile]
+        )
+        self._refresh_profile_selector(profile.id)
+
+    def _delete_widget_profile(self) -> None:
+        profile_id = self.widgetProfileSelector.currentData()
+        if not profile_id:
+            return
+        widgets = [
+            item for item in self._working.widgets if item.id != profile_id
+        ]
+        servers = self._working.servers
+        if not widgets:
+            servers = [
+                replace(server, show_in_widget=False)
+                for server in servers
+            ]
+        self._working = replace(
+            self._working,
+            widgets=widgets,
+            servers=servers,
+        )
+        self._refresh_profile_selector()
+
+    def _pick_profile_color(self, button: QPushButton) -> None:
+        current = QColor(button.property("currentColor"))
+        color = QColorDialog.getColor(current, self, "Выберите цвет")
+        if color.isValid():
+            self._set_profile_color_button(button, color.name())
+
+    @staticmethod
+    def _set_profile_color_button(button: QPushButton, color: str) -> None:
+        button.setProperty("currentColor", color)
+        button.setStyleSheet(
+            f"QPushButton {{ background: {color}; color: #10231a; border: none; "
+            "border-radius: 10px; padding: 10px; font-weight: 800; text-align: left; } "
+            "QPushButton:hover { opacity: 0.9; }"
+        )
+
     def _save(self) -> None:
+        self._save_widget_profile()
         hk = self.hotkeyEdit.keySequence().toString()
         notification_start = (
             self.notificationStart.time().hour() * 60

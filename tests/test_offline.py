@@ -21,6 +21,7 @@ from mcmonitor.config import (  # noqa: E402
     AppConfig,
     ConfigError,
     ServerConfig,
+    WidgetProfile,
     load_config,
     save_config,
 )
@@ -348,6 +349,42 @@ def test_config_roundtrip() -> None:
         assert again.notify_joins is True
 
 
+def test_widget_profiles_roundtrip_and_validation() -> None:
+    profile = WidgetProfile(
+        id="primary",
+        name="Избранное",
+        server_addresses=("one.example", "two.example"),
+        widget_bg_color="#112233",
+        widget_accent_color="#aabbcc",
+        widget_opacity=0.72,
+        x=120,
+        y=240,
+        visible=False,
+    )
+    saved = AppConfig(widgets=[profile]).to_dict()
+    restored = AppConfig.from_dict(saved).widgets[0]
+    assert restored == profile
+    clamped = WidgetProfile.parse({
+        "id": "secondary",
+        "name": "Второй",
+        "server_addresses": ["one.example", "one.example"],
+        "widget_opacity": 0.1,
+    })
+    assert clamped.widget_opacity == 0.4
+    assert clamped.server_addresses == ("one.example",)
+    try:
+        AppConfig.from_dict({
+            "widgets": [
+                {"id": "duplicate", "name": "A"},
+                {"id": "duplicate", "name": "B"},
+            ]
+        })
+    except ConfigError:
+        pass
+    else:
+        raise AssertionError("duplicate widget profile IDs must be rejected")
+
+
 def test_ping_sort_mode_is_valid_and_persistent() -> None:
     config = AppConfig.from_dict({"server_sort_mode": "ping", "servers": []})
     assert config.server_sort_mode == "ping"
@@ -381,15 +418,21 @@ def test_widget_reload_preserves_status_cache() -> None:
         }
         controller = object.__new__(WidgetApp)
         controller.config_path = path
+        controller.config = AppConfig(servers=[ServerConfig("SMP", "keep.example")])
         controller.statuses = statuses
         controller.widget = SimpleNamespace(
             statuses=statuses,
             display={},
             expanded=None,
             _hovered_row=None,
+            state=SimpleNamespace(widget_visible=False),
             resize_to_content=lambda: None,
             update=lambda: None,
         )
+        controller.widgets = [controller.widget]
+        controller._sync_widgets = lambda: None
+        controller._update_widget_visibility_actions = lambda: None
+        controller.show_widget = lambda **_kwargs: None
         controller.timer = SimpleNamespace(setInterval=lambda _interval: None)
         controller.set_hotkey = lambda _sequence: None
         controller.main_window = SimpleNamespace(refresh_servers=lambda: None)
@@ -425,6 +468,7 @@ def test_priority_alert_uses_windows_notification_when_widget_is_visible() -> No
         mark_loading=lambda _loading: None,
         mark_updated=lambda: None,
     )
+    controller.widgets = [controller.widget]
     controller.main_window = SimpleNamespace(refresh_statuses=lambda: None)
     controller._report_catalog_status = lambda _server, _status: None
     controller.show_toast = toasts.append
@@ -1184,6 +1228,7 @@ def main() -> None:
         test_update_rejects_untrusted_asset_url,
         test_config_parse,
         test_config_roundtrip,
+        test_widget_profiles_roundtrip_and_validation,
         test_ping_sort_mode_is_valid_and_persistent,
         test_config_interval_floor,
         test_widget_reload_preserves_status_cache,

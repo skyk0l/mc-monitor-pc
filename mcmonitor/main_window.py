@@ -3441,9 +3441,18 @@ class MainWindow(QMainWindow):
             updated_server if item.address == server.address else item
             for item in self.controller.config.servers
         ]
-        self._save_config(updated)
+        self._save_config(
+            updated,
+            address_changes={server.address: updated_server.address},
+        )
 
-    def _save_config(self, servers: list[ServerConfig], *, sync: bool = True) -> None:
+    def _save_config(
+        self,
+        servers: list[ServerConfig],
+        *,
+        sync: bool = True,
+        address_changes: dict[str, str] | None = None,
+    ) -> None:
         old_addresses = {
             server.address.casefold() for server in self.controller.config.servers
         }
@@ -3451,7 +3460,52 @@ class MainWindow(QMainWindow):
             server for server in servers
             if server.address.casefold() not in old_addresses
         ]
-        updated = replace(self.controller.config, servers=servers)
+        address_lookup = {
+            old.casefold(): new for old, new in (address_changes or {}).items()
+        }
+        previous_servers = {
+            server.address.casefold(): server
+            for server in self.controller.config.servers
+        }
+        updated_servers = {server.address.casefold(): server for server in servers}
+        available_addresses = {server.address.casefold() for server in servers}
+        widgets = [
+            replace(
+                profile,
+                server_addresses=tuple(
+                    address
+                    for address in dict.fromkeys(
+                        address_lookup.get(item.casefold(), item)
+                        for item in profile.server_addresses
+                    )
+                    if address.casefold() in available_addresses
+                ),
+            )
+            for profile in self.controller.config.widgets
+        ]
+        if widgets:
+            primary_addresses = set(widgets[0].server_addresses)
+            for old_address, previous in previous_servers.items():
+                new_address = address_lookup.get(old_address, previous.address)
+                current = updated_servers.get(new_address.casefold())
+                if current is None or current.show_in_widget == previous.show_in_widget:
+                    continue
+                if current.show_in_widget:
+                    primary_addresses.add(current.address)
+                else:
+                    primary_addresses.discard(current.address)
+            widgets[0] = replace(
+                widgets[0],
+                server_addresses=tuple(
+                    server.address for server in servers
+                    if server.address in primary_addresses
+                ),
+            )
+        updated = replace(
+            self.controller.config,
+            servers=servers,
+            widgets=widgets,
+        )
         try:
             save_config(self.controller.config_path, updated)
         except OSError as exc:
