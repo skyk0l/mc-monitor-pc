@@ -83,6 +83,8 @@ revoke all on public.server_catalog_collector_samples from public, anon, authent
 revoke all on public.server_catalog_collection_state from public, anon, authenticated;
 grant select, insert, update
     on public.server_catalog_collector_samples to service_role;
+grant update (version, motd, favicon)
+    on public.server_catalog to service_role;
 
 create or replace function public.add_server_to_catalog(
     server_address text,

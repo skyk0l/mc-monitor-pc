@@ -23,8 +23,9 @@
    ```
    Run [`supabase_server_history_collector_schedule.sql`](./supabase_server_history_collector_schedule.sql)
    to invoke the collector every five minutes. It rotates through up to 25 catalog
-   servers per run, stores status and visible player names, and skips servers for which
-   both status providers fail.
+   servers per run, stores status and visible player names, refreshes version/MOTD/icon
+   metadata when providers return it, and skips servers for which both status providers
+   fail.
 7. In Authentication → Providers → Email, enable email confirmations and configure
    Supabase SMTP and the confirmation template to include `{{ .Token }}` so the app can
    verify the one-time code. The built-in test email service only delivers to

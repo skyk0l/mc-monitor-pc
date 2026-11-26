@@ -11,6 +11,9 @@ type Sample = {
   online_count: number;
   max_count: number;
   players: string[];
+  version: string;
+  motd: string;
+  favicon: string;
 };
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -82,6 +85,18 @@ function integer(value: unknown): number {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0;
 }
 
+function favicon(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const encoded = value.startsWith("data:")
+    ? value.slice(value.indexOf(",") + 1)
+    : value;
+  return encoded.length <= 60_000 && /^[A-Za-z0-9+/]+={0,2}$/.test(encoded)
+    ? encoded
+    : "";
+}
+
 function sampleFrom(
   server: CatalogServer,
   payload: Record<string, unknown>,
@@ -102,6 +117,9 @@ function sampleFrom(
     online_count: onlineCount,
     max_count: Math.max(maxCount, onlineCount),
     players: online ? playerNames(rawPlayers) : [],
+    version: text(payload.version).slice(0, 100),
+    motd: text(payload.motd).replace(/§./g, "").slice(0, 2_000),
+    favicon: favicon(payload.icon),
   };
 }
 
@@ -176,6 +194,10 @@ async function collect(samples: Sample[]): Promise<void> {
   if (samples.length === 0) {
     return;
   }
+  const statusSamples = samples.map(
+    ({ version: _version, motd: _motd, favicon: _favicon, ...sample }) =>
+      sample,
+  );
   const response = await fetch(
     `${supabaseUrl}/rest/v1/server_catalog_collector_samples?on_conflict=server_id,sampled_at`,
     {
@@ -183,12 +205,43 @@ async function collect(samples: Sample[]): Promise<void> {
       headers: serviceHeaders({
         Prefer: "resolution=merge-duplicates,return=minimal",
       }),
-      body: JSON.stringify(samples),
+      body: JSON.stringify(statusSamples),
     },
   );
   if (!response.ok) {
     throw new Error(
       `Unable to store history samples: HTTP ${response.status}.`,
+    );
+  }
+  await Promise.all(samples.map(updateCatalogMetadata));
+}
+
+async function updateCatalogMetadata(sample: Sample): Promise<void> {
+  const metadata: Record<string, string> = {};
+  if (sample.version) {
+    metadata.version = sample.version;
+  }
+  if (sample.motd) {
+    metadata.motd = sample.motd;
+  }
+  if (sample.favicon) {
+    metadata.favicon = sample.favicon;
+  }
+  if (Object.keys(metadata).length === 0) {
+    return;
+  }
+
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/server_catalog?id=eq.${sample.server_id}`,
+    {
+      method: "PATCH",
+      headers: serviceHeaders({ Prefer: "return=minimal" }),
+      body: JSON.stringify(metadata),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Unable to update catalog metadata for server ${sample.server_id}: HTTP ${response.status}.`,
     );
   }
 }
